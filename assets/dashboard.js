@@ -5,7 +5,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '' };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '' };
   let chartJobs = [];
   let toastTimer = null;
 
@@ -28,6 +28,25 @@
   function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
   function currentControls() { return data.controls_by_date?.[state.date] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
+  function filterPlatformRows(rows) {
+    const query = String(state.platformQuery || '').trim().toLocaleLowerCase('zh-CN');
+    if (!query) return rows;
+    return rows.filter(row => [
+      row.date,
+      row.branch,
+      row.parent_name,
+      row.control_action,
+      row.control_status,
+      row.stagnant_score,
+      row.clearout_count,
+      row.last_clearout_date,
+      row.last_clearout_type
+    ].map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(query));
+  }
+  function filteredControls() { return filterPlatformRows(currentControls()); }
+  function filteredScores() { return filterPlatformRows(currentScores()); }
+  function currentDataLabel() { return state.platform === '京东' ? 'T-2' : 'T-1'; }
+  function currentWindowLabel() { return state.platform === '京东' ? 'T-8 至 T-2' : 'T-7 至 T-1'; }
 
   function scoreClass(value) {
     const score = Number(value || 0);
@@ -80,6 +99,7 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2300);
   }
 
+
   function initialize() {
     if (!data?.meta || !data?.platforms) {
       setText('#freshness', '数据加载失败');
@@ -98,6 +118,7 @@
       const button = event.target.closest('[data-platform]');
       if (!button || button.dataset.platform === state.platform) return;
       state.platform = button.dataset.platform;
+      state.platformQuery = '';
       $$('.segment', $('#platformSwitcher')).forEach(item => {
         const active = item === button;
         item.classList.toggle('active', active);
@@ -120,6 +141,36 @@
       renderAll();
     });
 
+    $('#platformSearch').addEventListener('input', event => {
+      state.platformQuery = event.target.value;
+      state.controlPage = 1;
+      state.scorePage = 1;
+      renderPlatformSearch();
+      renderControls();
+      renderScores();
+    });
+    $('#platformSearch').addEventListener('keydown', event => {
+      if (event.key === 'Escape' && state.platformQuery) {
+        event.stopPropagation();
+        state.platformQuery = '';
+        event.target.value = '';
+        state.controlPage = 1;
+        state.scorePage = 1;
+        renderPlatformSearch();
+        renderControls();
+        renderScores();
+      }
+    });
+    $('#clearPlatformSearch').addEventListener('click', () => {
+      state.platformQuery = '';
+      $('#platformSearch').value = '';
+      state.controlPage = 1;
+      state.scorePage = 1;
+      renderPlatformSearch();
+      renderControls();
+      renderScores();
+      $('#platformSearch').focus();
+    });
     $('#branchSearch').addEventListener('input', event => {
       state.branchQuery = event.target.value;
       renderBranchSearch();
@@ -174,7 +225,11 @@
 
   function renderDateSelector() {
     const dates = datesForPlatform();
-    $('#dateSelect').innerHTML = [...dates].reverse().map(day => `<option value="${day}" ${day === state.date ? 'selected' : ''}>${day}</option>`).join('');
+    setText('#dateWindowLabel', `${currentDataLabel()} 数据日`);
+    $('#dateSelect').disabled = !dates.length;
+    $('#dateSelect').innerHTML = dates.length
+      ? [...dates].reverse().map(day => `<option value="${day}" ${day === state.date ? 'selected' : ''}>${day}</option>`).join('')
+      : '<option value="">暂无源数据</option>';
     updateDateButtons();
   }
 
@@ -208,16 +263,20 @@
 
   function renderMeta() {
     const meta = data.meta;
-    setText('#freshness', `数据日 ${state.date || '—'}`);
-    $('#freshness').innerHTML = `<span class="live-dot"></span>数据日 ${escapeHtml(state.date || '—')}`;
-    $('#metaStrip').innerHTML = [
+    setText('#freshness', `${currentDataLabel()} 数据日 ${state.date || '—'}`);
+    $('#freshness').innerHTML = `<span class="live-dot"></span>${currentDataLabel()} 数据日 ${escapeHtml(state.date || '—')}`;
+    const metaItems = [
       `交件数据 ${meta.timeout_start} — ${meta.as_of}`,
-      `积分更新至 ${meta.score_as_of || '—'}`,
-      `管控更新至 ${meta.control_as_of || '—'}`,
+      `${currentWindowLabel()} 监控窗口`,
       `${state.platform}平台视图`
-    ].map((item, index) => `<span>${index ? '<i></i>' : ''}${escapeHtml(item)}</span>`).join('');
+    ];
+    if (state.platform === '抖音') {
+      metaItems.splice(1, 0, `积分更新至 ${meta.score_as_of || '—'}`, `管控更新至 ${meta.control_as_of || '—'}`);
+    }
+    $('#metaStrip').innerHTML = metaItems.map((item, index) => `<span>${index ? '<i></i>' : ''}${escapeHtml(item)}</span>`).join('');
     setText('#top10Platform', state.platform);
     setText('#top10Date', state.date || '—');
+    setText('#warningSubtitle', `${currentDataLabel()} 交件超时 TOP10 客户，点击分部查看全部客户的 ${currentWindowLabel()} 趋势。`);
     setText('#footerMeta', `生成于 ${meta.generated_at} · 本地离线运行`);
   }
 
@@ -227,7 +286,7 @@
     const branches = new Set(rows.map(row => row.branch)).size;
     setText('#kpiTimeout', formatNumber(total));
     setText('#kpiBranches', `${branches}`);
-    setText('#kpiTimeoutNote', `${state.date} · 客户合计`);
+    setText('#kpiTimeoutNote', `${state.date || '—'} · ${currentDataLabel()} 客户合计`);
     setText('#kpiBranchesNote', `${rows.length} 个客户 / ${branches} 个分部`);
 
     if (state.platform === '抖音') {
@@ -245,7 +304,7 @@
       setText('#kpiRiskNote', 'TOP10 客户内部预警');
       setText('#kpiControlLabel', '历史上榜一级公司');
       setText('#kpiControl', `${parents}`);
-      setText('#kpiControlNote', '淘宝内部上榜记录');
+      setText('#kpiControlNote', `${state.platform}内部上榜记录`);
     }
   }
 
@@ -255,7 +314,8 @@
     const range = new Set(dayRange(state.date));
     const source = data.trends?.[state.platform] || {};
     const rows = Object.entries(source).filter(([branch, branchData]) => {
-      const haystack = `${branch} ${branchData?.parent_name || ''}`.toLocaleLowerCase('zh-CN');
+      const customers = (branchData?.customers || []).map(item => `${item.customer || ''} ${item.customer_code || ''}`).join(' ');
+      const haystack = `${branch} ${branchData?.parent_name || ''} ${customers}`.toLocaleLowerCase('zh-CN');
       return haystack.includes(normalized);
     }).map(([branch, branchData]) => {
       const activeCustomers = (branchData.customers || []).map(customer => {
@@ -277,7 +337,7 @@
         starts: lowerBranch.startsWith(normalized)
       };
     }).sort((a, b) => Number(b.exact) - Number(a.exact) || Number(b.starts) - Number(a.starts) || b.weekTotal - a.weekTotal || a.branch.localeCompare(b.branch, 'zh-CN'));
-    return { total: rows.length, rows: rows.slice(0, 18) };
+    return { total: rows.length, rows: rows.slice(0, 10) };
   }
 
   function renderBranchSearch() {
@@ -291,7 +351,7 @@
     if (!query) {
       results.hidden = true;
       results.innerHTML = '';
-      setText('#branchSearchHint', `覆盖 ${formatNumber(branchCount)} 个网点 · 支持分部与一级公司名称`);
+      setText('#branchSearchHint', `覆盖 ${formatNumber(branchCount)} 个网点 · 支持客户、分部与一级公司名称`);
       return;
     }
     const matches = branchSearchRows(query);
@@ -301,23 +361,26 @@
       results.innerHTML = `<div class="branch-search-empty"><strong>未找到“${escapeHtml(query)}”</strong><span>请尝试缩短关键词，或检查当前平台与数据日期。</span></div>`;
       return;
     }
-    results.innerHTML = `<div class="branch-search-results-head"><div><span>SEARCH RESULTS</span><strong>${escapeHtml(query)}</strong></div><p>${matches.total > matches.rows.length ? `共 ${matches.total} 个匹配，优先展示近 7 天超时量最高的 ${matches.rows.length} 个` : `共 ${matches.total} 个匹配网点`}</p></div>
+    results.innerHTML = `<div class="branch-search-results-head"><div><span>SEARCH RESULTS</span><strong>${escapeHtml(query)}</strong></div><p>${matches.total > matches.rows.length ? `共 ${matches.total} 个匹配，优先展示窗口超时量最高的 ${matches.rows.length} 个` : `共 ${matches.total} 个匹配网点`}</p></div>
       <div class="branch-search-results-grid">${matches.rows.map(row => `<button class="branch-search-result js-branch" type="button" data-branch="${encodeName(row.branch)}">
         <span class="branch-search-name"><strong title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}</strong><small title="${escapeHtml(row.parent)}">一级公司 · ${escapeHtml(row.parent)}</small></span>
-        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>T-1 36H</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>近7天36H</small></span><span><b>${formatNumber(row.customerCount)}</b><small>近期客户</small></span></span>
+        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>${currentDataLabel()} 36H</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>${currentWindowLabel()} 36H</small></span><span><b>${formatNumber(row.customerCount)}</b><small>窗口客户</small></span></span>
         <span class="branch-search-open">${row.lastActiveDate ? `最近数据 ${shortDate(row.lastActiveDate)}` : '近7天暂无数据'}<i>查看趋势</i></span>
       </button>`).join('')}</div>`;
   }
   function renderTop10() {
     const rows = top10Rows();
     const douyin = state.platform === '抖音';
-    $('#top10Table').style.minWidth = douyin ? '1500px' : '1120px';
+    const table = $('#top10Table');
+    table.style.minWidth = douyin ? '1500px' : '1120px';
+    table.classList.toggle('douyin-columns', douyin);
     $('#top10Head').innerHTML = douyin
       ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
       : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
     if (!rows.length) {
-      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : 9}">该日期暂无交件预警数据</td></tr>`;
+      const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
+      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
     } else {
       $('#top10Body').innerHTML = rows.map(row => {
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
@@ -330,25 +393,38 @@
     }
 
     setText('#warningStatus', douyin ? '聚焦最高风险客户' : '内部交件预警');
-    setText('#top10Caption', douyin ? '按 36H 交件超时量降序 · 平台风险字段已联动' : '按 36H 交件超时量降序 · 仅内部预警数据');
+    setText('#top10Caption', douyin ? '按 36H 交件超时量降序 · 平台风险字段已联动' : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
     $('#topLegend').hidden = !douyin;
     $('#top10Footnote').textContent = douyin
       ? '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
-      : '淘宝当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。';
+      : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
   }
 
   function renderPlatformModule() {
     const douyin = state.platform === '抖音';
-    $('#platformPlaceholder').hidden = douyin;
-    $('#platformPanels').hidden = !douyin;
-    setText('#controlStatus', douyin ? '抖音平台数据已接入' : '淘宝仅内部预警');
+    $('#platform-control').hidden = !douyin;
+    $('#platformControlNav').hidden = !douyin;
     if (!douyin) return;
+    setText('#controlStatus', '抖音平台数据已接入');
+    renderPlatformSearch();
     renderControls();
     renderScores();
   }
 
+  function renderPlatformSearch() {
+    const input = $('#platformSearch');
+    const clear = $('#clearPlatformSearch');
+    const query = String(state.platformQuery || '').trim();
+    if (input.value !== state.platformQuery) input.value = state.platformQuery;
+    clear.hidden = !state.platformQuery;
+    if (!query) {
+      setText('#platformSearchHint', `覆盖 ${currentControls().length} 条管控记录 · ${currentScores().length} 个高积分网点`);
+      return;
+    }
+    setText('#platformSearchHint', `找到 ${filteredControls().length} 条管控记录 · ${filteredScores().length} 个高积分网点`);
+  }
   function renderControls() {
-    const rows = currentControls();
+    const rows = filteredControls();
     const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.controlPage = Math.min(state.controlPage, pages);
     const pageRows = rows.slice((state.controlPage - 1) * PAGE_SIZE, state.controlPage * PAGE_SIZE);
@@ -360,12 +436,12 @@
       <td>${scoreChip(row.stagnant_score)}</td>
       <td>${formatNumber(row.clearout_count)}次</td>
       <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
-    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">最近 7 天暂无网点维度管控记录</td></tr>';
+    </tr>`).join('') : `<tr class="empty-row"><td colspan="6">${state.platformQuery ? '没有匹配当前关键词的管控记录' : '最近 7 天暂无网点维度管控记录'}</td></tr>`;
     renderPagination($('#controlPagination'), state.controlPage, pages, rows.length, 'control');
   }
 
   function renderScores() {
-    const rows = currentScores();
+    const rows = filteredScores();
     const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.scorePage = Math.min(state.scorePage, pages);
     const pageRows = rows.slice((state.scorePage - 1) * PAGE_SIZE, state.scorePage * PAGE_SIZE);
@@ -378,7 +454,7 @@
         <td>${formatNumber(row.clearout_count)}次</td>
         <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
       </tr>`;
-    }).join('') : '<tr class="empty-row"><td colspan="4">滚动 16 天内暂无积分达到 6 分的网点</td></tr>';
+    }).join('') : `<tr class="empty-row"><td colspan="4">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
   }
 
@@ -405,7 +481,9 @@
   }
 
   function dayRange(endDay, count = 7) {
+    if (!endDay) return [];
     const end = new Date(`${endDay}T00:00:00`);
+    if (Number.isNaN(end.getTime())) return [];
     const dates = [];
     for (let offset = count - 1; offset >= 0; offset -= 1) {
       const day = new Date(end);
@@ -436,31 +514,43 @@
       return { ...customer, series, total, hasSourcePoint };
     }).filter(customer => customer.hasSourcePoint).sort((a, b) => b.total - a.total);
     const risk = branchRisk(branch);
-    const history = data.history_lookup?.[state.platform]?.[parent] || { months: [], branches: [], customer_count: 0 };
+    const history = data.history_all_lookup?.[parent] || { months: [], branches: [], customer_count: 0 };
+    const historyRange = new Set(range);
+    const historyDetailSupported = state.platform === '抖音' || state.platform === '淘宝';
+    const historyRows = historyDetailSupported
+      ? (data.history_detail_lookup?.[parent] || []).filter(row => historyRange.has(row.date) && row.platform === state.platform)
+      : [];
+    const historyCustomerCount = new Set(historyRows.map(row => `${row.platform}|${row.customer}|${row.customer_code}`)).size;
     const latestTotal = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.timeout_36h || 0), 0);
     const weekTotal = customers.reduce((sum, customer) => sum + customer.total, 0);
 
-    setText('#drawerKicker', `${state.platform} · T-7 至 T-1`);
+    setText('#drawerKicker', `${state.platform} · ${currentWindowLabel()}`);
     setText('#drawerTitle', branch);
     setText('#drawerParent', `一级公司 · ${parent}`);
     $('#drawerSummary').innerHTML = [
-      ['近7天客户', `${customers.length}个`],
-      ['近7天36H超时', formatNumber(weekTotal)],
-      ['T-1 36H超时', formatNumber(latestTotal)],
-      [state.platform === '抖音' ? '当前停滞积分' : '历史上榜客户', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${history.customer_count || 0}个`]
+      ['窗口客户', `${customers.length}个`],
+      ['窗口36H超时', formatNumber(weekTotal)],
+      [`${currentDataLabel()} 36H超时`, formatNumber(latestTotal)],
+      [state.platform === '抖音' ? '当前停滞积分' : '窗口上榜客户', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${historyCustomerCount}个`]
     ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
 
-    $('#drawerHistory').innerHTML = `<div class="history-head"><h3>一级公司历史缺货上榜</h3><span>${history.branches.length} 个下属分部曾上榜</span></div>
-      <div class="history-months">${history.months.length ? history.months.map(item => `<span class="history-month">${monthLabel(item.month)} <b>${item.days}天</b></span>`).join('') : '<span class="history-month">暂无记录</span>'}</div>
-      <p class="history-branches">${history.branches.length ? `涉及分部：${escapeHtml(history.branches.join('、'))}` : '该一级公司暂无对应平台的历史上榜记录。'}</p>`;
+    const historyPanel = $('#drawerHistory');
+    historyPanel.hidden = !historyDetailSupported;
+    historyPanel.innerHTML = historyDetailSupported ? `<div class="history-head"><div><h3>一级公司历史缺货上榜</h3><p>数据源：②揽收环节上榜管控清单 · ${currentWindowLabel()}</p></div><span>${historyRows.length} 条有效记录</span></div>
+      ${historyRows.length ? `<div class="history-detail-list">${historyRows.map(row => `<article class="history-detail-item">
+        <div class="history-detail-title"><span>${shortDate(row.date)}</span><i>${escapeHtml(row.platform)}</i><strong title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</strong></div>
+        <p class="history-detail-branch" title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}${row.customer_code ? ` · 客户编码 ${escapeHtml(row.customer_code)}` : ''}</p>
+        <div class="history-detail-grid"><div><span>超时原因</span><p>${escapeHtml(row.reason)}</p></div><div><span>整改动作</span><p>${escapeHtml(row.action)}</p></div></div>
+      </article>`).join('')}</div>` : '<div class="history-detail-empty">该窗口内暂无“超时原因、整改动作”均完整的上榜记录。</div>'}
+      <p class="history-source">累计涉及 ${history.branches.length} 个下属分部；原因或整改动作为空的记录已隐藏。</p>` : '';
 
     chartJobs = [];
     if (!customers.length) {
-      $('#drawerCharts').innerHTML = '<div class="drawer-empty">该分部在所选 7 天窗口内没有客户数据。</div>';
+      $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在 ${currentWindowLabel()} 窗口内没有客户数据。</div>`;
     } else {
-      $('#drawerCharts').innerHTML = `<div class="charts-heading"><h3>全部客户趋势</h3><span>${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示</span></div>${customers.map((customer, index) => {
+      $('#drawerCharts').innerHTML = `<div class="charts-heading"><h3>全部客户趋势</h3><span>${currentWindowLabel()} · ${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示</span></div>${customers.map((customer, index) => {
         const latest = customer.series.at(-1);
-        return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · T-1超时率 ${formatRate(latest.timeout_rate_36h)}</p></div><div class="chart-stat"><strong>${formatNumber(customer.total)}</strong><span>近7天36H超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>36H超时量</span><span><i class="line"></i>36H超时率</span></div></article>`;
+        return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latest.timeout_rate_36h)}</p></div><div class="chart-stat"><strong>${formatNumber(customer.total)}</strong><span>${currentWindowLabel()} 36H超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>36H超时量</span><span><i class="line"></i>36H超时率</span></div></article>`;
       }).join('')}`;
       requestAnimationFrame(() => {
         customers.forEach((customer, index) => {
