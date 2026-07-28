@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f5f5f7">
+  <title>交件风险中心</title>
+  <link rel="stylesheet" href="assets/dashboard.css?v=6">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <nav class="topbar" aria-label="主导航">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="交件风险中心首页">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>交件风险中心</span>
+      </a>
+      <div class="nav-links" aria-label="页面模块">
+        <a href="#platform-control">平台预警与管控</a>
+        <a href="#delivery-warning">交件预警</a>
+      </div>
+      <div class="freshness" id="freshness"><span class="live-dot"></span>数据载入中</div>
+    </div>
+  </nav>
+
+  <main id="top" class="page-shell">
+    <header class="hero">
+      <div class="eyebrow"><span class="eyebrow-dot"></span>揽收健康 · 每日作战视图</div>
+      <h1>交件风险，<span>一眼看清。</span></h1>
+      <p class="hero-copy">把客户缺货、交件超时、平台积分与清退记录归到同一条风险链路，优先处理今天最值得关注的网点。</p>
+
+      <div class="hero-controls">
+        <div class="segmented" id="platformSwitcher" role="tablist" aria-label="平台筛选">
+          <button class="segment active" type="button" role="tab" aria-selected="true" data-platform="抖音"><span class="platform-icon douyin">音</span>抖音</button>
+          <button class="segment" type="button" role="tab" aria-selected="false" data-platform="淘宝"><span class="platform-icon taobao">淘</span>淘宝</button>
+        </div>
+        <div class="date-control" aria-label="数据日期">
+          <button class="icon-button" id="previousDate" type="button" aria-label="前一天">‹</button>
+          <label class="date-select-wrap">
+            <span>T-1 数据日</span>
+            <select id="dateSelect" aria-label="选择数据日期"></select>
+          </label>
+          <button class="icon-button" id="nextDate" type="button" aria-label="后一天">›</button>
+        </div>
+      </div>
+
+      <div class="meta-strip" id="metaStrip"></div>
+    </header>
+
+    <section class="kpi-grid" aria-label="关键指标">
+      <article class="kpi-card kpi-primary">
+        <div class="kpi-icon"><span class="mini-bars"><i></i><i></i><i></i></span></div>
+        <p>TOP10 · 36H超时量</p>
+        <strong id="kpiTimeout">—</strong>
+        <span id="kpiTimeoutNote">T-1 客户合计</span>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-icon risk"><span>!</span></div>
+        <p id="kpiRiskLabel">高积分网点</p>
+        <strong id="kpiRisk">—</strong>
+        <span id="kpiRiskNote">滚动16天 ≥ 6分</span>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-icon control"><span class="pulse"></span></div>
+        <p id="kpiControlLabel">执行中网点管控</p>
+        <strong id="kpiControl">—</strong>
+        <span id="kpiControlNote">抖音平台实时状态</span>
+      </article>
+      <article class="kpi-card">
+        <div class="kpi-icon branch"><span></span></div>
+        <p>TOP10 涉及分部</p>
+        <strong id="kpiBranches">—</strong>
+        <span id="kpiBranchesNote">客户维度去重</span>
+      </article>
+    </section>
+
+    <section class="content-section" id="platform-control">
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker"><span class="kicker-index blue">01</span>风险联动</div>
+          <h2>平台预警与管控</h2>
+          <p>左侧追踪最近 7 天平台动作，右侧锁定滚动 16 天停滞积分达到 6 分及以上的网点。</p>
+        </div>
+        <div class="section-status"><span class="status-dot active"></span><span id="controlStatus">抖音平台数据已接入</span></div>
+      </div>
+
+      <div class="platform-placeholder" id="platformPlaceholder" hidden>
+        <div class="placeholder-orb">淘</div>
+        <h3>淘宝当前仅展示内部交件预警</h3>
+        <p>平台积分与管控结果尚未接入。下方交件预警、客户趋势与历史缺货信息仍可正常使用。</p>
+      </div>
+
+      <div class="split-grid" id="platformPanels">
+        <article class="data-card panel-card">
+          <div class="panel-title">
+            <div>
+              <span class="panel-label">最近 7 天</span>
+              <h3>平台管控记录</h3>
+            </div>
+            <span class="record-count" id="controlCount">0 条</span>
+          </div>
+          <div class="table-scroll compact-scroll">
+            <table class="data-table compact-table">
+              <thead><tr><th>管控日期</th><th>网点名称</th><th>管控动作</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
+              <tbody id="controlBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="controlPagination" aria-label="管控记录分页"></div>
+        </article>
+
+        <article class="data-card panel-card">
+          <div class="panel-title">
+            <div>
+              <span class="panel-label warning">风险阈值 ≥ 6</span>
+              <h3>高停滞积分网点</h3>
+            </div>
+            <span class="record-count" id="scoreCount">0 条</span>
+          </div>
+          <div class="table-scroll compact-scroll">
+            <table class="data-table compact-table score-table">
+              <thead><tr><th>网点名称</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
+              <tbody id="scoreBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="scorePagination" aria-label="高积分网点分页"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="content-section" id="delivery-warning">
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker"><span class="kicker-index">02</span>核心模块</div>
+          <h2>交件预警</h2>
+          <p id="warningSubtitle">T-1 交件超时 TOP10 客户，点击分部查看全部客户的 T-7 至 T-1 趋势。</p>
+        </div>
+        <div class="section-status"><span class="status-dot critical"></span><span id="warningStatus">聚焦最高风险客户</span></div>
+      </div>
+      <div class="branch-search-card">
+        <div class="branch-search-copy">
+          <span>网点检索</span>
+          <h3>查找 TOP10 以外的近期数据</h3>
+          <p>输入分部或一级公司名称，查看该网点近 7 天客户与 36H 交件超时，并可继续打开趋势图。</p>
+        </div>
+        <div class="branch-search-control">
+          <label class="branch-search-input" for="branchSearch">
+            <span class="search-glyph" aria-hidden="true"></span>
+            <input id="branchSearch" type="search" autocomplete="off" placeholder="搜索网点名称，如：佛山南海" aria-controls="branchSearchResults">
+            <button id="clearBranchSearch" type="button" hidden>清除</button>
+          </label>
+          <span class="branch-search-hint" id="branchSearchHint">输入关键词开始搜索</span>
+        </div>
+      </div>
+      <div class="branch-search-results" id="branchSearchResults" aria-live="polite" hidden></div>
+      <article class="data-card data-card-wide">
+        <div class="card-toolbar">
+          <div>
+            <h3><span id="top10Platform">抖音</span> · <span id="top10Date">—</span></h3>
+            <p id="top10Caption">按 36H 交件超时量降序</p>
+          </div>
+          <div class="legend-row" id="topLegend">
+            <span><i class="legend-dot red"></i>10分触发清退</span>
+            <span><i class="legend-dot amber"></i>6分高风险</span>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table top10-table" id="top10Table">
+            <thead id="top10Head"></thead>
+            <tbody id="top10Body"></tbody>
+          </table>
+        </div>
+        <div class="card-footnote" id="top10Footnote"></div>
+      </article>
+    </section>
+
+    <section class="methodology" aria-label="口径说明">
+      <div class="method-copy">
+        <span class="method-icon">i</span>
+        <div><h3>口径说明</h3><p>停滞积分 = T-16 至 T-1 内“物流停滞-揽收端”与“物流停滞-全链路”的当前违规积分之和；6 分进入高风险观察，10 分触发积分清退规则。</p></div>
+      </div>
+      <button class="text-button" id="showQuality" type="button">查看数据质量</button>
+    </section>
+
+    <footer>
+      <span>交件风险中心</span>
+      <span id="footerMeta">离线数据看板</span>
+    </footer>
+  </main>
+
+  <div class="drawer-layer" id="drawerLayer" aria-hidden="true">
+    <button class="drawer-backdrop" id="drawerBackdrop" type="button" aria-label="关闭详情"></button>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+      <div class="drawer-header">
+        <div><span class="drawer-kicker" id="drawerKicker">分部趋势</span><h2 id="drawerTitle">—</h2><p id="drawerParent">—</p></div>
+        <button class="close-button" id="closeDrawer" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="drawer-summary" id="drawerSummary"></div>
+      <div class="drawer-history" id="drawerHistory"></div>
+      <div class="drawer-charts" id="drawerCharts"></div>
+    </aside>
+  </div>
+
+  <div class="quality-modal" id="qualityModal" aria-hidden="true">
+    <button class="quality-backdrop" id="qualityBackdrop" type="button" aria-label="关闭数据质量"></button>
+    <section class="quality-card" role="dialog" aria-modal="true" aria-labelledby="qualityTitle">
+      <div class="quality-head"><div><span>DATA QUALITY</span><h2 id="qualityTitle">数据质量报告</h2></div><button class="close-button" id="closeQuality" type="button" aria-label="关闭">×</button></div>
+      <div id="qualityContent"></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
+  <script src="data/dashboard_bundle.js?v=6"></script>
+  <script src="assets/dashboard.js?v=6"></script>
+</body>
+</html>
