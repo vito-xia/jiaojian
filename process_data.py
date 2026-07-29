@@ -17,11 +17,12 @@ from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
 
 PLATFORM_ALIAS = {"淘天": "淘宝"}
-PLATFORMS = ("抖音", "淘宝")
+PLATFORMS = ("抖音", "淘宝", "京东", "快手")
 SCORE_SCENES = {"物流停滞-揽收端", "物流停滞-全链路"}
 CONTROL_ACTIONS = {"揽收能力预警", "限制面单新签", "限制面单取号"}
 ACTION_SEVERITY = {"揽收能力预警": 1, "限制面单新签": 2, "限制面单取号": 3}
 EXCLUDED_CUSTOMER_KEYWORDS = ("温宿韵通达", "新疆", "北亩")
+EMPTY_DETAIL_VALUES = {"", "-", "--", "—", "/", "无", "暂无"}
 
 
 def text(value: Any) -> str:
@@ -48,6 +49,10 @@ def integer(value: Any) -> int:
 def customer_is_excluded(customer_name: Any) -> bool:
     name = text(customer_name)
     return any(keyword in name for keyword in EXCLUDED_CUSTOMER_KEYWORDS)
+
+
+def has_detail(value: Any) -> bool:
+    return text(value) not in EMPTY_DETAIL_VALUES
 
 
 def date_text(value: Any, epoch=None, default_year: int | None = None) -> str:
@@ -101,8 +106,9 @@ def locate(data_dir: Path, prefix: str) -> Path:
 
 def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    platform_pattern = "|".join(re.escape(platform) for platform in PLATFORMS)
     for path in sorted((data_dir / "①交件超时").glob("*.xlsx")):
-        match = re.match(r"(抖音|淘宝)_(\d{1,2})月(\d{1,2})日\.xlsx$", path.name)
+        match = re.match(rf"({platform_pattern})_(\d{{1,2}})月(\d{{1,2}})日\.xlsx$", path.name)
         if not match or path.name.startswith("~$"):
             continue
         platform, month, day = match.groups()
@@ -259,6 +265,49 @@ def build_shortage_history(top5: list[dict[str, Any]], mapping: dict[str, dict[s
     return result
 
 
+def build_shortage_history_all(top5: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) -> dict[str, dict[str, Any]]:
+    work: dict[str, dict[str, Any]] = defaultdict(lambda: {"months": defaultdict(set), "branches": set(), "customers": set()})
+    for row in top5:
+        parent = parent_of(row["branch"], mapping)
+        bucket = work[parent]
+        bucket["months"][row["date"][:7]].add(row["date"])
+        bucket["branches"].add(row["branch"])
+        bucket["customers"].add(row["customer"])
+    return {
+        parent: {
+            "months": [{"month": month, "days": len(days)} for month, days in sorted(bucket["months"].items())],
+            "branches": sorted(bucket["branches"]),
+            "customer_count": len(bucket["customers"]),
+        }
+        for parent, bucket in work.items()
+    }
+
+
+def build_shortage_details(top5: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen: set[tuple[str, str, str, str, str, str]] = set()
+    for row in top5:
+        if not has_detail(row["reason"]) or not has_detail(row["action"]):
+            continue
+        parent = parent_of(row["branch"], mapping)
+        key = (row["date"], row["platform"], row["branch"], row["customer"], row["reason"], row["action"])
+        if key in seen:
+            continue
+        seen.add(key)
+        result[parent].append({
+            "date": row["date"],
+            "platform": row["platform"],
+            "branch": row["branch"],
+            "customer": row["customer"],
+            "customer_code": row["customer_code"],
+            "reason": row["reason"],
+            "action": row["action"],
+        })
+    for rows in result.values():
+        rows.sort(key=lambda row: (row["date"], row["platform"], row["branch"], row["customer"]), reverse=True)
+    return dict(result)
+
+
 def clearout_type(mechanism: str) -> str:
     if "熔断制" in mechanism:
         return "熔断制"
@@ -339,6 +388,8 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
     excluded_top5_count = raw_top5_count - len(top5)
     dates_by_platform = {p: sorted({r["date"] for r in timeout_rows if r["platform"] == p}) for p in PLATFORMS}
     shortage = build_shortage_history(top5, mapping)
+    shortage_all = build_shortage_history_all(top5, mapping)
+    shortage_details = build_shortage_details(top5, mapping)
     current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, as_of)
     rolling_score = build_score_calculator(daily_scores)
     top10_by_date = {p: {} for p in PLATFORMS}
@@ -350,6 +401,9 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
                 branch, parent = row["branch"], parent_of(row["branch"], mapping)
                 clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
                 ctrl = current_controls.get(branch, {"action": "", "status": "", "start_date": ""})
+                history_shortage = shortage.get(platform, {}).get(parent)
+                if history_shortage is None and platform not in ("抖音", "淘宝"):
+                    history_shortage = shortage_all.get(parent)
                 enriched.append({**row, "rank": rank, "parent_name": parent,
                     "stagnant_score": rolling_score(branch, day) if platform == "抖音" else None,
                     "current_control": ctrl["action"] if platform == "抖音" else "",
@@ -358,7 +412,7 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
                     "clearout_count": clear["count"] if platform == "抖音" else None,
                     "last_clearout_date": clear["last_date"] if platform == "抖音" else "",
                     "last_clearout_type": clear["last_type"] if platform == "抖音" else "",
-                    "history_shortage": shortage.get(platform, {}).get(parent, {"months": [], "branches": [], "customer_count": 0}),
+                    "history_shortage": history_shortage or {"months": [], "branches": [], "customer_count": 0},
                 })
             top10_by_date[platform][day] = enriched
     branch_events = [r for r in controls if r["is_branch_level"] and r["control_action"] in CONTROL_ACTIONS and r["start_date"]]
@@ -418,7 +472,10 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
         },
         "platforms": {p: {"dates": dates_by_platform[p], "top10_by_date": top10_by_date[p]} for p in PLATFORMS},
         "controls_by_date": control_by_date, "high_scores_by_date": high_scores_by_date,
-        "history_lookup": shortage, "trends": build_trends(timeout_rows, mapping),
+        "history_lookup": shortage,
+        "history_all_lookup": shortage_all,
+        "history_detail_lookup": shortage_details,
+        "trends": build_trends(timeout_rows, mapping),
     }
 
 

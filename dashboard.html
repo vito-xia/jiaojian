@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
-  <title>交件风险中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=6">
+  <title>交件监控中心</title>
+  <link rel="stylesheet" href="assets/dashboard.css?v=8">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -14,12 +14,12 @@
 
   <nav class="topbar" aria-label="主导航">
     <div class="topbar-inner">
-      <a class="brand" href="#top" aria-label="交件风险中心首页">
+      <a class="brand" href="#top" aria-label="交件监控中心首页">
         <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
-        <span>交件风险中心</span>
+        <span>交件监控中心</span>
       </a>
       <div class="nav-links" aria-label="页面模块">
-        <a href="#platform-control">平台预警与管控</a>
+        <a id="platformControlNav" href="#platform-control">平台预警与管控</a>
         <a href="#delivery-warning">交件预警</a>
       </div>
       <div class="freshness" id="freshness"><span class="live-dot"></span>数据载入中</div>
@@ -28,19 +28,22 @@
 
   <main id="top" class="page-shell">
     <header class="hero">
-      <div class="eyebrow"><span class="eyebrow-dot"></span>揽收健康 · 每日作战视图</div>
-      <h1>交件风险，<span>一眼看清。</span></h1>
-      <p class="hero-copy">把客户缺货、交件超时、平台积分与清退记录归到同一条风险链路，优先处理今天最值得关注的网点。</p>
+      <div class="eyebrow"><span class="eyebrow-dot"></span>每日关注窗口健康度</div>
+      <h1>揽交监控<span>一体化</span></h1>
+      <p class="hero-copy">结合内部数据和平台预警管控，优先处理今天最值得关注的网点。</p>
+
 
       <div class="hero-controls">
         <div class="segmented" id="platformSwitcher" role="tablist" aria-label="平台筛选">
           <button class="segment active" type="button" role="tab" aria-selected="true" data-platform="抖音"><span class="platform-icon douyin">音</span>抖音</button>
           <button class="segment" type="button" role="tab" aria-selected="false" data-platform="淘宝"><span class="platform-icon taobao">淘</span>淘宝</button>
+          <button class="segment" type="button" role="tab" aria-selected="false" data-platform="京东"><span class="platform-icon jd">京</span>京东</button>
+          <button class="segment" type="button" role="tab" aria-selected="false" data-platform="快手"><span class="platform-icon kuaishou">快</span>快手</button>
         </div>
         <div class="date-control" aria-label="数据日期">
           <button class="icon-button" id="previousDate" type="button" aria-label="前一天">‹</button>
           <label class="date-select-wrap">
-            <span>T-1 数据日</span>
+            <span id="dateWindowLabel">T-1 数据日</span>
             <select id="dateSelect" aria-label="选择数据日期"></select>
           </label>
           <button class="icon-button" id="nextDate" type="button" aria-label="后一天">›</button>
@@ -87,12 +90,22 @@
         <div class="section-status"><span class="status-dot active"></span><span id="controlStatus">抖音平台数据已接入</span></div>
       </div>
 
-      <div class="platform-placeholder" id="platformPlaceholder" hidden>
-        <div class="placeholder-orb">淘</div>
-        <h3>淘宝当前仅展示内部交件预警</h3>
-        <p>平台积分与管控结果尚未接入。下方交件预警、客户趋势与历史缺货信息仍可正常使用。</p>
-      </div>
 
+      <div class="platform-search-bar">
+        <div class="platform-search-copy">
+          <span>模块检索</span>
+          <strong>搜索管控与高积分网点</strong>
+          <small>保留两张表的现有字段与分页</small>
+        </div>
+        <div class="platform-search-control">
+          <label class="branch-search-input platform-search-input" for="platformSearch">
+            <span class="search-glyph" aria-hidden="true"></span>
+            <input id="platformSearch" type="search" autocomplete="off" placeholder="搜索网点、一级公司、管控动作或状态">
+            <button id="clearPlatformSearch" type="button" hidden>清除</button>
+          </label>
+          <span class="platform-search-hint" id="platformSearchHint">输入关键词筛选当前模块</span>
+        </div>
+      </div>
       <div class="split-grid" id="platformPanels">
         <article class="data-card panel-card">
           <div class="panel-title">
@@ -142,8 +155,8 @@
       <div class="branch-search-card">
         <div class="branch-search-copy">
           <span>网点检索</span>
-          <h3>查找 TOP10 以外的近期数据</h3>
-          <p>输入分部或一级公司名称，查看该网点近 7 天客户与 36H 交件超时，并可继续打开趋势图。</p>
+          <h3>搜索当前平台的近期风险网点</h3>
+          <p>输入客户、分部或一级公司名称，查看匹配网点近 7 天的 36H 交件超时与客户趋势。</p>
         </div>
         <div class="branch-search-control">
           <label class="branch-search-input" for="branchSearch">
@@ -185,7 +198,7 @@
     </section>
 
     <footer>
-      <span>交件风险中心</span>
+      <span>交件监控中心</span>
       <span id="footerMeta">离线数据看板</span>
     </footer>
   </main>
@@ -213,7 +226,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=6"></script>
-  <script src="assets/dashboard.js?v=6"></script>
+  <script src="data/dashboard_bundle.js?v=8"></script>
+  <script src="assets/dashboard.js?v=8"></script>
 </body>
 </html>
