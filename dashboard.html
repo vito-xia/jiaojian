@@ -78,7 +78,7 @@
         <strong id="kpiBranches">—</strong>
         <span id="kpiBranchesNote">客户维度去重</span>
       </article>
-    </section>
+     </section>
 
     <section class="content-section" id="platform-control">
       <div class="section-heading">
@@ -141,14 +141,14 @@
           <div class="pagination" id="scorePagination" aria-label="高积分网点分页"></div>
         </article>
       </div>
-    </section>
+     </section>
 
     <section class="content-section" id="delivery-warning">
       <div class="section-heading">
         <div>
           <div class="section-kicker"><span class="kicker-index">02</span>核心模块</div>
           <h2>交件预警</h2>
-          <p id="warningSubtitle">T-1 交件超时 TOP10 客户，点击分部查看全部客户的 T-7 至 T-1 趋势。</p>
+          <p id="warningSubtitle">T-1 交件超时 TOP10 客户，点击分部查看全部客户最近 15 天的趋势。</p>
         </div>
         <div class="section-status"><span class="status-dot critical"></span><span id="warningStatus">聚焦最高风险客户</span></div>
       </div>
@@ -156,7 +156,7 @@
         <div class="branch-search-copy">
           <span>网点检索</span>
           <h3>搜索当前平台的近期风险网点</h3>
-          <p>输入客户、分部或一级公司名称，查看匹配网点近 7 天的 36H 交件超时与客户趋势。</p>
+          <p>输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。</p>
         </div>
         <div class="branch-search-control">
           <label class="branch-search-input" for="branchSearch">
@@ -187,15 +187,26 @@
         </div>
         <div class="card-footnote" id="top10Footnote"></div>
       </article>
-    </section>
+     </section>
 
     <section class="methodology" aria-label="口径说明">
       <div class="method-copy">
         <span class="method-icon">i</span>
         <div><h3>口径说明</h3><p>停滞积分 = T-16 至 T-1 内“物流停滞-揽收端”与“物流停滞-全链路”的当前违规积分之和；6 分进入高风险观察，10 分触发积分清退规则。</p></div>
       </div>
-      <button class="text-button" id="showQuality" type="button">查看数据质量</button>
     </section>
+
+    <section class="daily-analysis" aria-labelledby="analysisTitle">
+      <div class="analysis-heading">
+        <div>
+          <span class="analysis-kicker">DAILY INSIGHT</span>
+          <h2 id="analysisTitle">当日平台数据分析</h2>
+          <p id="analysisSubtitle">根据当前平台与数据日自动更新，只分析页面所示 TOP10 客户。</p>
+        </div>
+        <span class="analysis-status" id="analysisStatus">正在计算</span>
+      </div>
+      <div id="analysisContent"></div>
+     </section>
 
     <footer>
       <span>交件监控中心</span>
@@ -216,17 +227,9 @@
     </aside>
   </div>
 
-  <div class="quality-modal" id="qualityModal" aria-hidden="true">
-    <button class="quality-backdrop" id="qualityBackdrop" type="button" aria-label="关闭数据质量"></button>
-    <section class="quality-card" role="dialog" aria-modal="true" aria-labelledby="qualityTitle">
-      <div class="quality-head"><div><span>DATA QUALITY</span><h2 id="qualityTitle">数据质量报告</h2></div><button class="close-button" id="closeQuality" type="button" aria-label="关闭">×</button></div>
-      <div id="qualityContent"></div>
-    </section>
-  </div>
-
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=8"></script>
-  <script src="assets/dashboard.js?v=8"></script>
+  <script src="data/dashboard_bundle.js?v=9"></script>
+  <script src="assets/dashboard.js?v=9"></script>
 </body>
 </html>

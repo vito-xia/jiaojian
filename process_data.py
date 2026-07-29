@@ -42,6 +42,12 @@ def number(value: Any) -> float:
         return 0.0
 
 
+def percentage_points(value: Any) -> float:
+    amount = number(value)
+    if isinstance(value, (int, float)) and 0 < abs(amount) <= 1:
+        amount *= 100
+    return round(amount, 4)
+
 def integer(value: Any) -> int:
     return int(round(number(value)))
 
@@ -143,6 +149,10 @@ def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], int]:
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet = workbook["TOP客户累计改善清单"]
     records, bad_dates = [], 0
+    platform_columns = {
+        "抖音": {"timeout_24h": 11, "timeout_36h": 12, "timeout_rate_36h": 13, "timeout_48h": 14},
+        "淘宝": {"timeout_24h": 15, "timeout_36h": 16, "timeout_rate_36h": 17, "timeout_48h": 18},
+    }
     for row in sheet.iter_rows(min_row=10, values_only=True):
         if not row or row[1] in (None, ""):
             continue
@@ -150,24 +160,29 @@ def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], int]:
         if not parsed_date:
             bad_dates += 1
             continue
-        platform = PLATFORM_ALIAS.get(text(row[9]), text(row[9]))
-        if platform not in PLATFORMS:
-            continue
-        records.append({
+        base = {
             "date": parsed_date,
             "branch": text(row[3]),
             "customer": text(row[5]),
             "customer_code": text(row[6]),
             "has_shipping_fallback": text(row[7]),
-            "platform": platform,
+            "source_platform": PLATFORM_ALIAS.get(text(row[9]), text(row[9])),
             "ranking_count": integer(row[10]),
-            "timeout_24h": integer(row[11] if platform == "抖音" else row[15]),
-            "timeout_36h": integer(row[12] if platform == "抖音" else row[16]),
-            "timeout_rate_36h": number(row[13] if platform == "抖音" else row[17]),
-            "timeout_48h": integer(row[14] if platform == "抖音" else row[18]),
             "reason": text(row[19]),
             "action": text(row[20]),
-        })
+        }
+        for platform, columns in platform_columns.items():
+            timeout_36h = integer(row[columns["timeout_36h"]])
+            if timeout_36h <= 0:
+                continue
+            records.append({
+                **base,
+                "platform": platform,
+                "timeout_24h": integer(row[columns["timeout_24h"]]),
+                "timeout_36h": timeout_36h,
+                "timeout_rate_36h": percentage_points(row[columns["timeout_rate_36h"]]),
+                "timeout_48h": integer(row[columns["timeout_48h"]]),
+            })
     workbook.close()
     return records, bad_dates
 
@@ -283,28 +298,27 @@ def build_shortage_history_all(top5: list[dict[str, Any]], mapping: dict[str, di
     }
 
 
-def build_shortage_details(top5: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) -> dict[str, list[dict[str, Any]]]:
+def build_shortage_details(top5: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = defaultdict(list)
     seen: set[tuple[str, str, str, str, str, str]] = set()
     for row in top5:
-        if not has_detail(row["reason"]) or not has_detail(row["action"]):
-            continue
-        parent = parent_of(row["branch"], mapping)
         key = (row["date"], row["platform"], row["branch"], row["customer"], row["reason"], row["action"])
         if key in seen:
             continue
         seen.add(key)
-        result[parent].append({
+        result[row["branch"]].append({
             "date": row["date"],
             "platform": row["platform"],
             "branch": row["branch"],
             "customer": row["customer"],
             "customer_code": row["customer_code"],
-            "reason": row["reason"],
-            "action": row["action"],
+            "timeout_36h": row["timeout_36h"],
+            "timeout_rate_36h": row["timeout_rate_36h"],
+            "reason": row["reason"] if has_detail(row["reason"]) else "",
+            "action": row["action"] if has_detail(row["action"]) else "",
         })
     for rows in result.values():
-        rows.sort(key=lambda row: (row["date"], row["platform"], row["branch"], row["customer"]), reverse=True)
+        rows.sort(key=lambda row: (row["date"], row["platform"], row["customer"]), reverse=True)
     return dict(result)
 
 
@@ -389,7 +403,7 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
     dates_by_platform = {p: sorted({r["date"] for r in timeout_rows if r["platform"] == p}) for p in PLATFORMS}
     shortage = build_shortage_history(top5, mapping)
     shortage_all = build_shortage_history_all(top5, mapping)
-    shortage_details = build_shortage_details(top5, mapping)
+    shortage_details = build_shortage_details(top5)
     current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, as_of)
     rolling_score = build_score_calculator(daily_scores)
     top10_by_date = {p: {} for p in PLATFORMS}
