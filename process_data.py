@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
@@ -60,6 +63,46 @@ def customer_is_excluded(customer_name: Any) -> bool:
 def has_detail(value: Any) -> bool:
     return text(value) not in EMPTY_DETAIL_VALUES
 
+
+def excel_column_number(letters: str) -> int:
+    result = 0
+    for character in letters.upper():
+        result = result * 26 + ord(character) - ord("A") + 1
+    return result
+
+
+def merged_reason_action_rows(path: Path, sheet_name: str) -> set[int]:
+    main_namespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    office_relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    package_relationships = "http://schemas.openxmlformats.org/package/2006/relationships"
+    with ZipFile(path) as archive:
+        workbook_root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        relationships_root = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        sheet = next(
+            node for node in workbook_root.findall(f".//{{{main_namespace}}}sheet")
+            if node.attrib.get("name") == sheet_name
+        )
+        relationship_id = sheet.attrib[f"{{{office_relationships}}}id"]
+        relationship = next(
+            node for node in relationships_root.findall(f".//{{{package_relationships}}}Relationship")
+            if node.attrib.get("Id") == relationship_id
+        )
+        target = relationship.attrib["Target"]
+        sheet_path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(f"xl/{target}")
+        sheet_root = ElementTree.fromstring(archive.read(sheet_path))
+
+    merged_rows: set[int] = set()
+    for cell_range in sheet_root.findall(f".//{{{main_namespace}}}mergeCell"):
+        reference = cell_range.attrib.get("ref", "")
+        match = re.fullmatch(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", reference)
+        if not match:
+            continue
+        start_column = excel_column_number(match.group(1))
+        end_column = excel_column_number(match.group(3))
+        if start_column > 20 or end_column < 21:
+            continue
+        merged_rows.update(range(int(match.group(2)), int(match.group(4)) + 1))
+    return merged_rows
 
 def date_text(value: Any, epoch=None, default_year: int | None = None) -> str:
     if value in (None, ""):
@@ -144,33 +187,47 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
     return records
 
 
-def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], int]:
+def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     path = locate(data_dir, "②")
+    merged_tu_rows = merged_reason_action_rows(path, "TOP客户累计改善清单")
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet = workbook["TOP客户累计改善清单"]
-    records, bad_dates = [], 0
+    records, branch_top5_rows, bad_dates = [], [], 0
     platform_columns = {
         "抖音": {"timeout_24h": 11, "timeout_36h": 12, "timeout_rate_36h": 13, "timeout_48h": 14},
         "淘宝": {"timeout_24h": 15, "timeout_36h": 16, "timeout_rate_36h": 17, "timeout_48h": 18},
     }
-    for row in sheet.iter_rows(min_row=10, values_only=True):
+    for row_number, row in enumerate(sheet.iter_rows(min_row=10, values_only=True), start=10):
         if not row or row[1] in (None, ""):
             continue
         parsed_date = date_text(row[1], workbook.epoch, year)
         if not parsed_date:
             bad_dates += 1
             continue
+        source_platform = PLATFORM_ALIAS.get(text(row[9]), text(row[9]))
+        reason = text(row[19])
+        action = text(row[20])
         base = {
             "date": parsed_date,
             "branch": text(row[3]),
             "customer": text(row[5]),
             "customer_code": text(row[6]),
             "has_shipping_fallback": text(row[7]),
-            "source_platform": PLATFORM_ALIAS.get(text(row[9]), text(row[9])),
+            "source_platform": source_platform,
             "ranking_count": integer(row[10]),
-            "reason": text(row[19]),
-            "action": text(row[20]),
         }
+        if source_platform in platform_columns:
+            columns = platform_columns[source_platform]
+            branch_top5_rows.append({
+                **base,
+                "source_row": row_number,
+                "platform": source_platform,
+                "timeout_36h": integer(row[columns["timeout_36h"]]),
+                "timeout_rate_36h": percentage_points(row[columns["timeout_rate_36h"]]),
+                "reason": reason,
+                "action": action,
+                "feedback_merged": row_number in merged_tu_rows,
+            })
         for platform, columns in platform_columns.items():
             timeout_36h = integer(row[columns["timeout_36h"]])
             if timeout_36h <= 0:
@@ -184,8 +241,7 @@ def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], int]:
                 "timeout_48h": integer(row[columns["timeout_48h"]]),
             })
     workbook.close()
-    return records, bad_dates
-
+    return records, branch_top5_rows, bad_dates
 
 def read_mapping(data_dir: Path) -> dict[str, dict[str, str]]:
     path = locate(data_dir, "③")
@@ -298,29 +354,23 @@ def build_shortage_history_all(top5: list[dict[str, Any]], mapping: dict[str, di
     }
 
 
-def build_shortage_details(top5: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    result: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    seen: set[tuple[str, str, str, str, str, str]] = set()
-    for row in top5:
-        key = (row["date"], row["platform"], row["branch"], row["customer"], row["reason"], row["action"])
-        if key in seen:
-            continue
-        seen.add(key)
-        result[row["branch"]].append({
-            "date": row["date"],
-            "platform": row["platform"],
-            "branch": row["branch"],
-            "customer": row["customer"],
-            "customer_code": row["customer_code"],
-            "timeout_36h": row["timeout_36h"],
-            "timeout_rate_36h": row["timeout_rate_36h"],
-            "reason": row["reason"] if has_detail(row["reason"]) else "",
-            "action": row["action"] if has_detail(row["action"]) else "",
-        })
-    for rows in result.values():
-        rows.sort(key=lambda row: (row["date"], row["platform"], row["customer"]), reverse=True)
-    return dict(result)
-
+def build_branch_top5_data(branch_top5_rows: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    result: dict[str, dict[str, list[dict[str, Any]]]] = {
+        "抖音": defaultdict(list),
+        "淘宝": defaultdict(list),
+    }
+    for row in branch_top5_rows:
+        platform = row["platform"]
+        branch = row["branch"]
+        if platform in result and branch:
+            result[platform][branch].append(row)
+    return {
+        platform: {
+            branch: sorted(rows, key=lambda row: (row["date"], row["source_row"]), reverse=True)
+            for branch, rows in sorted(by_branch.items())
+        }
+        for platform, by_branch in result.items()
+    }
 
 def clearout_type(mechanism: str) -> str:
     if "熔断制" in mechanism:
@@ -393,17 +443,18 @@ def build_trends(timeout_rows: list[dict[str, Any]], mapping: dict[str, dict[str
     return result
 
 
-def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumulative_scores, controls, as_of: str, bad_top5_dates: int):
+def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, as_of: str, bad_top5_dates: int):
     raw_timeout_count = len(timeout_rows)
     raw_top5_count = len(top5)
     timeout_rows = [row for row in timeout_rows if not customer_is_excluded(row["customer"])]
     top5 = [row for row in top5 if not customer_is_excluded(row["customer"])]
+    branch_top5_rows = [row for row in branch_top5_rows if not customer_is_excluded(row["customer"])]
     excluded_timeout_count = raw_timeout_count - len(timeout_rows)
     excluded_top5_count = raw_top5_count - len(top5)
     dates_by_platform = {p: sorted({r["date"] for r in timeout_rows if r["platform"] == p}) for p in PLATFORMS}
     shortage = build_shortage_history(top5, mapping)
     shortage_all = build_shortage_history_all(top5, mapping)
-    shortage_details = build_shortage_details(top5)
+    branch_top5_data = build_branch_top5_data(branch_top5_rows)
     current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, as_of)
     rolling_score = build_score_calculator(daily_scores)
     top10_by_date = {p: {} for p in PLATFORMS}
@@ -488,7 +539,7 @@ def build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumul
         "controls_by_date": control_by_date, "high_scores_by_date": high_scores_by_date,
         "history_lookup": shortage,
         "history_all_lookup": shortage_all,
-        "history_detail_lookup": shortage_details,
+        "branch_top5_data": branch_top5_data,
         "trends": build_trends(timeout_rows, mapping),
     }
 
@@ -504,14 +555,14 @@ def main() -> None:
     timeout_rows = read_timeout(args.data_dir, args.year)
     if not timeout_rows:
         raise RuntimeError("未读取到交件超时数据")
-    top5, bad_dates = read_top5(args.data_dir, args.year)
+    top5, branch_top5_rows, bad_dates = read_top5(args.data_dir, args.year)
     mapping = read_mapping(args.data_dir)
     score_rows, daily_scores, cumulative_scores = read_scores(args.data_dir)
     controls = read_controls(args.data_dir)
     as_of = args.as_of or max(row["date"] for row in timeout_rows)
     if as_of not in {row["date"] for row in timeout_rows}:
         raise ValueError(f"--as-of {as_of} 不在交件数据日期中")
-    dashboard = build_dashboard(timeout_rows, top5, mapping, score_rows, daily_scores, cumulative_scores, controls, as_of, bad_dates)
+    dashboard = build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, as_of, bad_dates)
     output = args.output_dir
     write_json(output / "timeout_daily.json", timeout_rows)
     write_json(output / "top5_control.json", top5)

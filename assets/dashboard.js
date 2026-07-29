@@ -500,6 +500,17 @@
     return candidates[0] || {};
   }
 
+  function branchTop5RecordHtml(row) {
+    const feedback = row.feedback_merged
+      ? `<div class="history-detail-grid single"><div><span>超时原因与整改动作</span><p>${escapeHtml(row.reason || row.action || '未反馈')}</p></div></div>`
+      : `<div class="history-detail-grid"><div><span>超时原因</span><p>${escapeHtml(row.reason || '未反馈')}</p></div><div><span>整改动作</span><p>${escapeHtml(row.action || '未反馈')}</p></div></div>`;
+    return `<article class="history-detail-item">
+      <div class="history-detail-title"><span>${shortDate(row.date)}</span><i>${escapeHtml(row.platform)}</i><strong title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</strong></div>
+      <p class="history-detail-branch" title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}${row.customer_code ? ` · 客户编码 ${escapeHtml(row.customer_code)}` : ''} · 36H超时 ${formatNumber(row.timeout_36h)} · 超时率 ${formatRate(row.timeout_rate_36h)}</p>
+      ${feedback}
+    </article>`;
+  }
+
   function openDrawer(branch) {
     const branchData = data.trends?.[state.platform]?.[branch];
     const parent = branchData?.parent_name || branchRisk(branch).parent_name || branch;
@@ -512,12 +523,8 @@
       return { ...customer, series, total, hasSourcePoint };
     }).filter(customer => customer.hasSourcePoint).sort((a, b) => b.total - a.total);
     const risk = branchRisk(branch);
-    const historyRange = new Set(range);
-    const historyDetailSupported = state.platform === '抖音' || state.platform === '淘宝';
-    const historyRows = historyDetailSupported
-      ? (data.history_detail_lookup?.[branch] || []).filter(row => historyRange.has(row.date) && row.platform === state.platform)
-      : [];
-    const historyCustomerCount = new Set(historyRows.map(row => `${row.platform}|${row.customer}|${row.customer_code}`)).size;
+    const branchTop5Supported = state.platform === '抖音' || state.platform === '淘宝';
+    const branchTop5Rows = branchTop5Supported ? (data.branch_top5_data?.[state.platform]?.[branch] || []) : [];
     const latestTotal = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.timeout_36h || 0), 0);
     const weekTotal = customers.reduce((sum, customer) => sum + customer.total, 0);
 
@@ -528,19 +535,25 @@
       ['窗口客户', `${customers.length}个`],
       ['15天36H超时', formatNumber(weekTotal)],
       [`${currentDataLabel()} 36H超时`, formatNumber(latestTotal)],
-      [state.platform === '抖音' ? '当前停滞积分' : '窗口上榜客户', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${historyCustomerCount}个`]
+      [state.platform === '抖音' ? '当前停滞积分' : '分部上榜记录', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${branchTop5Rows.length}条`]
     ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
 
     const historyPanel = $('#drawerHistory');
-    historyPanel.hidden = !historyDetailSupported;
-    historyPanel.innerHTML = historyDetailSupported ? `<div class="history-head"><div><h3>当前网点上榜原因与整改</h3><p>数据源：②揽收环节上榜管控清单 · ${trendWindowLabel()} · 抖音按 M 列、淘宝按 Q 列非零判定</p></div><span>${historyRows.length} 条上榜记录</span></div>
-      ${historyRows.length ? `<div class="history-detail-list">${historyRows.map(row => `<article class="history-detail-item">
-        <div class="history-detail-title"><span>${shortDate(row.date)}</span><i>${escapeHtml(row.platform)}</i><strong title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</strong></div>
-        <p class="history-detail-branch" title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}${row.customer_code ? ` · 客户编码 ${escapeHtml(row.customer_code)}` : ''} · 36H超时 ${formatNumber(row.timeout_36h)} · 超时率 ${formatRate(row.timeout_rate_36h)}</p>
-        <div class="history-detail-grid"><div><span>超时原因</span><p>${escapeHtml(row.reason || '未填写')}</p></div><div><span>整改动作</span><p>${escapeHtml(row.action || '未填写')}</p></div></div>
-      </article>`).join('')}</div>` : '<div class="history-detail-empty">当前网点在最近 15 天内没有该平台的上榜记录。</div>'}
-      <p class="history-source">每条原因与整改动作均来自该客户、该日期的同一源表行；空项保留并标注“未填写”。</p>` : '';
-
+    historyPanel.hidden = !branchTop5Supported;
+    historyPanel.innerHTML = branchTop5Supported
+      ? `<div class="history-head"><div><h3>分部TOP5上榜数据</h3><p>${escapeHtml(branch)} · ${escapeHtml(state.platform)}</p></div><span>${branchTop5Rows.length} 条记录</span></div>
+        ${branchTop5Rows.length ? `<label class="history-record-picker" for="branchTop5Select"><span>选择上榜记录</span><select id="branchTop5Select">${branchTop5Rows.map((row, index) => `<option value="${index}">${escapeHtml(`${shortDate(row.date)} · ${row.customer}`)}</option>`).join('')}</select></label><div class="history-record-view" id="branchTop5Record"></div>` : `<div class="history-detail-empty">该分部暂无${escapeHtml(state.platform)}平台TOP5上榜数据。</div>`}`
+      : '';
+    if (branchTop5Rows.length) {
+      const recordSelect = $('#branchTop5Select');
+      const recordView = $('#branchTop5Record');
+      const renderSelectedRecord = () => {
+        const selected = branchTop5Rows[Number(recordSelect.value) || 0];
+        recordView.innerHTML = selected ? branchTop5RecordHtml(selected) : '';
+      };
+      recordSelect.addEventListener('change', renderSelectedRecord);
+      renderSelectedRecord();
+    }
     chartJobs = [];
     if (!customers.length) {
       $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
