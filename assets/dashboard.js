@@ -26,7 +26,8 @@
   }
   function datesForPlatform() { return data.platforms?.[state.platform]?.dates || []; }
   function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
-  function currentControls() { return data.controls_by_date?.[state.date] || []; }
+  function currentControlDate() { return data.meta?.control_as_of || state.date; }
+  function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
   function filterPlatformRows(rows) {
     const query = String(state.platformQuery || '').trim().toLocaleLowerCase('zh-CN');
@@ -403,7 +404,7 @@
     $('#platform-control').hidden = !douyin;
     $('#platformControlNav').hidden = !douyin;
     if (!douyin) return;
-    setText('#controlStatus', '抖音平台数据已接入');
+    setText('#controlStatus', `抖音平台数据已接入 · 更新至 ${shortDate(currentControlDate())}`);
     renderPlatformSearch();
     renderControls();
     renderScores();
@@ -416,7 +417,7 @@
     if (input.value !== state.platformQuery) input.value = state.platformQuery;
     clear.hidden = !state.platformQuery;
     if (!query) {
-      setText('#platformSearchHint', `覆盖 ${currentControls().length} 条管控记录 · ${currentScores().length} 个高积分网点`);
+      setText('#platformSearchHint', `管控更新至 ${shortDate(currentControlDate())} · ${currentControls().length} 条管控记录 · ${currentScores().length} 个高积分网点`);
       return;
     }
     setText('#platformSearchHint', `找到 ${filteredControls().length} 条管控记录 · ${filteredScores().length} 个高积分网点`);

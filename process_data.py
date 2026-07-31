@@ -455,7 +455,11 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     shortage = build_shortage_history(top5, mapping)
     shortage_all = build_shortage_history_all(top5, mapping)
     branch_top5_data = build_branch_top5_data(branch_top5_rows)
-    current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, as_of)
+    score_dates = sorted({r["date"] for r in score_rows})
+    control_dates = sorted({r["start_date"] for r in controls if r["start_date"]})
+    control_as_of = control_dates[-1] if control_dates else as_of
+    # 平台管控是独立的实时快照，允许比交件 T-1 更新；不能用 as_of 截断 7 月 31 日的管控。
+    current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, control_as_of)
     rolling_score = build_score_calculator(daily_scores)
     top10_by_date = {p: {} for p in PLATFORMS}
     for platform in PLATFORMS:
@@ -482,7 +486,9 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             top10_by_date[platform][day] = enriched
     branch_events = [r for r in controls if r["is_branch_level"] and r["control_action"] in CONTROL_ACTIONS and r["start_date"]]
     control_by_date, high_scores_by_date = {}, {}
-    for day in dates_by_platform["抖音"]:
+    # 保留交件日期索引，同时补充最新管控快照日期，供前端在选择 7 月 30 日时展示 7 月 31 日管控。
+    control_days = sorted(set(dates_by_platform["抖音"]) | {control_as_of})
+    for day in control_days:
         end, start = iso_day(day), iso_day(day) - timedelta(days=6)
         page = []
         for row in branch_events:
@@ -510,8 +516,6 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         high_scores_by_date[day] = high
     all_branches = {r["branch"] for r in timeout_rows + top5 + score_rows + controls if r.get("branch")}
     unmatched = sorted(branch for branch in all_branches if branch not in mapping)
-    score_dates = sorted({r["date"] for r in score_rows})
-    control_dates = sorted({r["start_date"] for r in controls if r["start_date"]})
     timeout_dates = sorted({r["date"] for r in timeout_rows})
     current_branch_executing = len({b for b in current_controls})
     current_merchant_executing = sum(merchant_counts.values())
@@ -520,7 +524,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         "meta": {
             "as_of": as_of, "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "score_as_of": score_dates[-1] if score_dates else "", "score_window_start": (iso_day(as_of) - timedelta(days=15)).isoformat(),
-            "control_as_of": control_dates[-1] if control_dates else "", "timeout_start": timeout_dates[0] if timeout_dates else "",
+            "control_as_of": control_as_of, "control_window_start": (iso_day(control_as_of) - timedelta(days=6)).isoformat() if control_as_of else "", "timeout_start": timeout_dates[0] if timeout_dates else "",
             "supported_platforms": list(PLATFORMS),
             "source_rows": {"timeout": raw_timeout_count, "top5": raw_top5_count, "mapping": len(mapping), "scores": len(score_rows), "controls": len(controls)},
             "analysis_rows": {"timeout": len(timeout_rows), "top5": len(top5)},
