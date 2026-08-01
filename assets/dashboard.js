@@ -5,7 +5,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '' };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1 };
   let chartJobs = [];
   let toastTimer = null;
 
@@ -29,6 +29,16 @@
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
   function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
+  function deliveryMonitor() { return data.delivery_monitor || {}; }
+  function currentDeliveryControls() { return deliveryMonitor().controls_by_date?.[state.date] || []; }
+  function currentDeliveryHighScores() { return deliveryMonitor().high_scores_by_date?.[state.date] || []; }
+  function filterDeliveryRows(rows) {
+    const query = String(state.deliveryQuery || '').trim().toLocaleLowerCase('zh-CN');
+    if (!query) return rows;
+    return rows.filter(row => Object.values(row).map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(query));
+  }
+  function filteredDeliveryControls() { return filterDeliveryRows(currentDeliveryControls()); }
+  function filteredDeliveryHighScores() { return filterDeliveryRows(currentDeliveryHighScores()); }
   function filterPlatformRows(rows) {
     const query = String(state.platformQuery || '').trim().toLocaleLowerCase('zh-CN');
     if (!query) return rows;
@@ -78,8 +88,9 @@
     return `<span class="rank ${kind}">${rank}</span>`;
   }
 
-  function branchButton(branch, parent) {
-    return `<button class="branch-button js-branch" type="button" data-branch="${encodeName(branch)}">${escapeHtml(branch)}</button><span class="subline" title="${escapeHtml(parent || branch)}">一级公司 · ${escapeHtml(parent || branch)}</span>`;
+  function branchButton(branch, parent, mode = "pickup") {
+    const drawerMode = mode === "delivery" ? ` data-drawer-mode="delivery"` : "";
+    return `<button class="branch-button js-branch" type="button" data-branch="${encodeName(branch)}"${drawerMode}>${escapeHtml(branch)}</button><span class="subline" title="${escapeHtml(parent || branch)}">一级公司 · ${escapeHtml(parent || branch)}</span>`;
   }
 
   function historyStack(history, maxItems = 6) {
@@ -121,6 +132,7 @@
       if (!button || button.dataset.platform === state.platform) return;
       state.platform = button.dataset.platform;
       state.platformQuery = '';
+      state.deliveryQuery = '';
       $$('.segment', $('#platformSwitcher')).forEach(item => {
         const active = item === button;
         item.classList.toggle('active', active);
@@ -130,6 +142,8 @@
       state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
       state.controlPage = 1;
       state.scorePage = 1;
+      state.deliveryControlPage = 1;
+      state.deliveryHighScorePage = 1;
       renderDateSelector();
       renderAll();
       showToast(`已切换至${state.platform}平台`);
@@ -139,6 +153,8 @@
       state.date = event.target.value;
       state.controlPage = 1;
       state.scorePage = 1;
+      state.deliveryControlPage = 1;
+      state.deliveryHighScorePage = 1;
       updateDateButtons();
       renderAll();
     });
@@ -173,6 +189,36 @@
       renderScores();
       $('#platformSearch').focus();
     });
+    $('#deliverySearch').addEventListener('input', event => {
+      state.deliveryQuery = event.target.value;
+      state.deliveryControlPage = 1;
+      state.deliveryHighScorePage = 1;
+      renderDeliverySearch();
+      renderDeliveryControls();
+      renderDeliveryHighScores();
+    });
+    $('#deliverySearch').addEventListener('keydown', event => {
+      if (event.key === 'Escape' && state.deliveryQuery) {
+        event.stopPropagation();
+        state.deliveryQuery = '';
+        event.target.value = '';
+        state.deliveryControlPage = 1;
+        state.deliveryHighScorePage = 1;
+        renderDeliverySearch();
+        renderDeliveryControls();
+        renderDeliveryHighScores();
+      }
+    });
+    $('#clearDeliverySearch').addEventListener('click', () => {
+      state.deliveryQuery = '';
+      $('#deliverySearch').value = '';
+      state.deliveryControlPage = 1;
+      state.deliveryHighScorePage = 1;
+      renderDeliverySearch();
+      renderDeliveryControls();
+      renderDeliveryHighScores();
+      $('#deliverySearch').focus();
+    });
     $('#branchSearch').addEventListener('input', event => {
       state.branchQuery = event.target.value;
       renderBranchSearch();
@@ -201,11 +247,13 @@
     $('#nextDate').addEventListener('click', () => moveDate(1));
     document.addEventListener('click', event => {
       const branch = event.target.closest('.js-branch');
-      if (branch) openDrawer(decodeURIComponent(branch.dataset.branch));
+      if (branch) openDrawer(decodeURIComponent(branch.dataset.branch), branch.dataset.drawerMode || 'pickup');
     });
 
     $('#controlPagination').addEventListener('click', event => changePage(event, 'control'));
     $('#scorePagination').addEventListener('click', event => changePage(event, 'score'));
+    $('#deliveryControlPagination').addEventListener('click', event => changePage(event, 'delivery-control'));
+    $('#deliveryHighScorePagination').addEventListener('click', event => changePage(event, 'delivery-high-score'));
     $('#closeDrawer').addEventListener('click', closeDrawer);
     $('#drawerBackdrop').addEventListener('click', closeDrawer);
     document.addEventListener('keydown', event => {
@@ -217,7 +265,7 @@
     let resizeTimer;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => chartJobs.forEach(job => drawComboChart(job.canvas, job.series)), 120);
+      resizeTimer = setTimeout(() => chartJobs.forEach(job => job.draw()), 120);
     });
   }
 
@@ -257,6 +305,7 @@
     renderTop10();
     renderBranchSearch();
     renderPlatformModule();
+    renderDeliveryModule();
     renderDailyAnalysis();
   }
 
@@ -457,6 +506,79 @@
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
   }
 
+  function deliveryActionPill(action) {
+    const labels = {
+      '派送能力预警': ['notice', '派送预警'],
+      '限制面单新签': ['sign', '限制新签'],
+      '限制面单到达': ['pickup', '限制到达']
+    };
+    const [kind, label] = labels[action] || ['none', '暂无管控'];
+    return `<span class="action-pill ${kind}">${label}</span>`;
+  }
+
+  function renderDeliveryModule() {
+    const active = state.platform === '抖音' && Boolean(deliveryMonitor().score_dates?.length || deliveryMonitor().control_dates?.length);
+    const section = $('#delivery-score-monitor');
+    const nav = $('#deliveryScoreNav');
+    if (section) section.hidden = !active;
+    if (nav) nav.hidden = !active;
+    if (!active) return;
+    setText('#deliveryScoreStatus', `派送数据已接入 · 更新至 ${shortDate(deliveryMonitor().as_of || state.date)}`);
+    renderDeliverySearch();
+    renderDeliveryControls();
+    renderDeliveryHighScores();
+  }
+
+  function renderDeliverySearch() {
+    const input = $('#deliverySearch');
+    const clear = $('#clearDeliverySearch');
+    if (!input) return;
+    const query = String(state.deliveryQuery || '').trim();
+    if (input.value !== state.deliveryQuery) input.value = state.deliveryQuery;
+    clear.hidden = !state.deliveryQuery;
+    if (!query) {
+      setText('#deliverySearchHint', `积分更新至 ${shortDate(deliveryMonitor().as_of)} · ${currentDeliveryControls().length} 条管控 · ${currentDeliveryHighScores().length} 个高积分网点`);
+      return;
+    }
+    setText('#deliverySearchHint', `找到 ${filteredDeliveryControls().length} 条管控 · ${filteredDeliveryHighScores().length} 个高积分网点`);
+  }
+
+  function renderDeliveryControls() {
+    const rows = filteredDeliveryControls();
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    state.deliveryControlPage = Math.min(state.deliveryControlPage, pages);
+    const pageRows = rows.slice((state.deliveryControlPage - 1) * PAGE_SIZE, state.deliveryControlPage * PAGE_SIZE);
+    setText('#deliveryControlCount', `${rows.length} 条`);
+    $('#deliveryControlBody').innerHTML = pageRows.length ? pageRows.map(row => `<tr>
+      <td>${shortDate(row.date)}</td>
+      <td>${branchButton(row.branch, row.parent_name, 'delivery')}<span class="subline">${escapeHtml(row.region || row.branch_code || '—')}</span></td>
+      <td>${deliveryActionPill(row.control_action)}</td>
+      <td>${scoreChip(row.rolling_score)}</td>
+      <td>${escapeHtml(row.control_category || row.control_mechanism || '—')}</td>
+      <td>${shortDate(row.end_date)}</td>
+    </tr>`).join('') : `<tr class="empty-row"><td colspan="6">${state.deliveryQuery ? '没有匹配当前关键词的派送管控记录' : '最近 7 天暂无派送管控记录'}</td></tr>`;
+    renderPagination($('#deliveryControlPagination'), state.deliveryControlPage, pages, rows.length, 'delivery-control');
+  }
+
+  function renderDeliveryHighScores() {
+    const rows = filteredDeliveryHighScores();
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    state.deliveryHighScorePage = Math.min(state.deliveryHighScorePage, pages);
+    const pageRows = rows.slice((state.deliveryHighScorePage - 1) * PAGE_SIZE, state.deliveryHighScorePage * PAGE_SIZE);
+    setText('#deliveryHighScoreCount', `${rows.length} 条`);
+    $('#deliveryHighScoreBody').innerHTML = pageRows.length ? pageRows.map(row => {
+      const width = Math.min(100, Number(row.stagnant_score || 0) / 32 * 100);
+      return `<tr>
+        <td>${branchButton(row.branch, row.parent_name, 'delivery')}<span class="subline">${escapeHtml(row.branch_code || '—')}</span></td>
+        <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill clear" style="width:${width}%"></span></span></div></td>
+        <td>${formatNumber(row.latest_daily_score)}分</td>
+        <td>${shortDate(row.latest_score_date)}</td>
+        <td>${escapeHtml(row.latest_abnormal_level || '—')}</td>
+      </tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="5">${state.deliveryQuery ? '没有匹配当前关键词的高积分停滞网点' : '最近 15 天暂无积分达到 12 分的网点'}</td></tr>`;
+    renderPagination($('#deliveryHighScorePagination'), state.deliveryHighScorePage, pages, rows.length, 'delivery-high-score');
+  }
+
   function renderPagination(container, page, pages, total, kind) {
     const visible = [];
     for (let value = 1; value <= pages; value += 1) {
@@ -476,7 +598,9 @@
     if (!button || button.disabled) return;
     const page = Number(button.dataset.page);
     if (kind === 'control') { state.controlPage = page; renderControls(); }
-    else { state.scorePage = page; renderScores(); }
+    else if (kind === 'score') { state.scorePage = page; renderScores(); }
+    else if (kind === 'delivery-control') { state.deliveryControlPage = page; renderDeliveryControls(); }
+    else if (kind === 'delivery-high-score') { state.deliveryHighScorePage = page; renderDeliveryHighScores(); }
   }
 
   function dayRange(endDay, count = 7) {
@@ -487,7 +611,10 @@
     for (let offset = count - 1; offset >= 0; offset -= 1) {
       const day = new Date(end);
       day.setDate(end.getDate() - offset);
-      dates.push(day.toISOString().slice(0, 10));
+      const year = day.getFullYear();
+      const month = String(day.getMonth() + 1).padStart(2, "0");
+      const date = String(day.getDate()).padStart(2, "0");
+      dates.push(year + "-" + month + "-" + date);
     }
     return dates;
   }
@@ -512,7 +639,115 @@
     </article>`;
   }
 
-  function openDrawer(branch) {
+  function renderBranchScoreTrend(branch, range) {
+    const panel = $('#drawerScoreTrend');
+    if (!panel) return;
+    const scenes = ['物流停滞-揽收端', '物流停滞-全链路'];
+    const branchScenes = data.branch_score_trends?.[branch] || {};
+    const availableScenes = scenes.filter(scene => (branchScenes[scene] || []).length);
+    if (!availableScenes.includes(state.scoreScene)) state.scoreScene = availableScenes[0] || scenes[0];
+    const scene = state.scoreScene;
+    const isPickup = scene === '物流停滞-揽收端';
+    const source = branchScenes[scene] || [];
+    const byDate = new Map(source.map(point => [point.date, point]));
+    const series = range.map(date => {
+      const sourcePoint = byDate.get(date);
+      if (sourcePoint) return {
+        ...sourcePoint,
+        shipment_timeout_rate: isPickup ? Number(sourcePoint.shipment_timeout_rate || 0) : sourcePoint.shipment_timeout_rate,
+        shipment_timeout_abnormal_count: isPickup ? Number(sourcePoint.shipment_timeout_abnormal_count || 0) : sourcePoint.shipment_timeout_abnormal_count
+      };
+      return {
+        date,
+        score: isPickup ? null : 0,
+        shipment_timeout_rate: isPickup ? 0 : null,
+        shipment_timeout_abnormal_count: isPickup ? 0 : null
+      };
+    });
+    const hasData = series.some(point => point.score !== null || point.shipment_timeout_rate !== null || point.shipment_timeout_abnormal_count !== null);
+    const options = scenes.map(item => '<option value="' + escapeHtml(item) + '"' + (item === scene ? ' selected' : '') + '>' + escapeHtml(item) + '</option>').join('');
+    panel.hidden = false;
+    panel.innerHTML = '<div class="score-trend-head"><div><h3>近期扣分趋势</h3><p>' + escapeHtml(branch) + ' · ' + escapeHtml(range[0] || '—') + ' — ' + escapeHtml(range.at(-1) || '—') + '</p></div><label><span>违规场景</span><select id="scoreSceneSelect">' + options + '</select></label></div>';
+    if (hasData) {
+      panel.innerHTML += '<canvas class="score-trend-chart" id="scoreTrendChart"></canvas><div class="chart-legend score-trend-legend">' +
+        (isPickup ? '<span><i></i>异常单量</span><span><i class="line"></i>超时率</span><span><i class="score"></i>扣分</span>' : '<span><i class="score-line"></i>扣分</span>') +
+        '</div>' + (isPickup ? '' : '<p class="score-trend-note">因平台未直接提供数据，超长单只展示扣分趋势</p>');
+    } else {
+      panel.innerHTML += '<div class="score-trend-empty">当前网点在 ' + escapeHtml(range[0] || '—') + ' 至 ' + escapeHtml(range.at(-1) || '—') + ' 暂无该违规场景数据。</div>';
+    }
+    const select = $('#scoreSceneSelect');
+    if (select) {
+      select.addEventListener('change', event => {
+        state.scoreScene = event.target.value;
+        renderBranchScoreTrend(branch, range);
+      });
+    }
+    chartJobs = chartJobs.filter(job => job.kind !== 'score');
+    const canvas = $('#scoreTrendChart');
+    if (canvas) {
+      const draw = () => drawScoreTrendChart(canvas, series, isPickup ? 'pickup' : 'full');
+      chartJobs.push({ kind: 'score', canvas, draw });
+      requestAnimationFrame(draw);
+    }
+  }
+  function renderDeliveryScoreTrend(branch, range) {
+    const panel = $('#drawerScoreTrend');
+    if (!panel) return;
+    const source = deliveryMonitor().trends?.[branch]?.series || [];
+    const byDate = new Map(source.map(point => [point.date, point]));
+    const series = range.map(date => byDate.get(date) || { date, daily_score: 0, rolling_score: 0 });
+    const hasData = source.some(point => range.includes(point.date));
+    panel.hidden = false;
+    panel.innerHTML = `<div class="score-trend-head"><div><h3>最近 15 天扣分趋势</h3><p>${escapeHtml(branch)} · ${escapeHtml(range[0] || '—')} — ${escapeHtml(range.at(-1) || '—')}</p></div></div>`;
+    if (hasData) {
+      panel.innerHTML += '<canvas class="score-trend-chart" id="scoreTrendChart"></canvas><div class="chart-legend score-trend-legend"><span><i></i>当日扣分</span><span><i class="line"></i>15日累计积分</span></div>';
+    } else {
+      panel.innerHTML += `<div class="score-trend-empty">当前网点在 ${escapeHtml(range[0] || '—')} 至 ${escapeHtml(range.at(-1) || '—')} 暂无派送积分数据。</div>`;
+    }
+    chartJobs = chartJobs.filter(job => job.kind !== 'score');
+    const canvas = $('#scoreTrendChart');
+    if (canvas) {
+      const draw = () => drawScoreTrendChart(canvas, series, 'delivery');
+      chartJobs.push({ kind: 'score', canvas, draw });
+      requestAnimationFrame(draw);
+    }
+  }
+
+  function openDeliveryDrawer(branch) {
+    const branchData = deliveryMonitor().trends?.[branch] || {};
+    const range = dayRange(state.date, 15);
+    const source = branchData.series || [];
+    const byDate = new Map(source.map(point => [point.date, point]));
+    const series = range.map(day => byDate.get(day) || { date: day, daily_score: 0, rolling_score: 0 });
+    const latest = series.at(-1) || { daily_score: 0, rolling_score: 0 };
+    const recentControlCount = currentDeliveryControls().filter(row => row.branch === branch && String(row.control_status || '').includes('执行中')).length;
+    const lastScoreDate = [...source].filter(point => range.includes(point.date)).sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date || '—';
+    setText('#drawerKicker', `派送积分监控 · 最近 15 天`);
+    setText('#drawerTitle', branch);
+    setText('#drawerParent', `一级公司 · ${branchData.parent_name || branch}`);
+    $('#drawerSummary').innerHTML = [
+      ['滚动累计积分', formatNumber(latest.rolling_score)],
+      ['最近单日扣分', formatNumber(latest.daily_score)],
+      ['最近违规日期', shortDate(lastScoreDate)],
+      ['执行中管控', `${recentControlCount}条`]
+    ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    $('#drawerHistory').hidden = true;
+    $('#drawerHistory').innerHTML = '';
+    $('#drawerCharts').hidden = true;
+    $('#drawerCharts').innerHTML = '';
+    chartJobs = [];
+    renderDeliveryScoreTrend(branch, range);
+    const layer = $('#drawerLayer');
+    layer.classList.add('open');
+    layer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => $('#closeDrawer').focus(), 60);
+  }
+  function openDrawer(branch, mode = "pickup") {
+    if (mode === 'delivery') {
+      openDeliveryDrawer(branch);
+      return;
+    }
     const branchData = data.trends?.[state.platform]?.[branch];
     const parent = branchData?.parent_name || branchRisk(branch).parent_name || branch;
     const range = dayRange(state.date, 15);
@@ -555,7 +790,9 @@
       recordSelect.addEventListener('change', renderSelectedRecord);
       renderSelectedRecord();
     }
+    $('#drawerCharts').hidden = false;
     chartJobs = [];
+    renderBranchScoreTrend(branch, range);
     if (!customers.length) {
       $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
     } else {
@@ -566,8 +803,9 @@
       requestAnimationFrame(() => {
         customers.forEach((customer, index) => {
           const canvas = $(`#chart-${index}`);
-          chartJobs.push({ canvas, series: customer.series });
-          drawComboChart(canvas, customer.series);
+          const draw = () => drawComboChart(canvas, customer.series);
+          chartJobs.push({ kind: 'customer', canvas, draw });
+          draw();
         });
       });
     }
@@ -597,7 +835,6 @@
     context.arcTo(x, y, x + width, y, r);
     context.closePath();
   }
-
   function drawComboChart(canvas, series) {
     if (!canvas || !canvas.isConnected) return;
     const cssWidth = Math.max(320, canvas.clientWidth || 740);
@@ -679,6 +916,200 @@
     }
   }
 
+
+  function drawScoreTrendChart(canvas, series, mode) {
+    if (!canvas || !canvas.isConnected) return;
+    const pickup = mode === 'pickup';
+    const cssWidth = Math.max(320, canvas.clientWidth || 740);
+    const cssHeight = Math.max(pickup ? 250 : 220, canvas.clientHeight || (pickup ? 260 : 228));
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(cssWidth * ratio);
+    canvas.height = Math.round(cssHeight * ratio);
+    const context = canvas.getContext('2d');
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, cssWidth, cssHeight);
+    const pad = { top: 25, right: 50, bottom: pickup ? 58 : 42, left: 45 };
+    const width = cssWidth - pad.left - pad.right;
+    const height = cssHeight - pad.top - pad.bottom;
+    const slot = width / Math.max(series.length, 1);
+    const scoreColors = { 0: '#8e8e93', 1: '#ff9f0a', 2: '#ff3b30' };
+    context.font = '9px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.textBaseline = 'middle';
+    if (mode === 'delivery') {
+      const scoreMaxRaw = Math.max(16, ...series.map(point => Number(point.daily_score || 0)), ...series.map(point => Number(point.rolling_score || 0)));
+      const scoreMax = Math.max(20, Math.ceil(scoreMaxRaw / 5) * 5);
+      for (let step = 0; step <= 4; step += 1) {
+        const y = pad.top + height - height * step / 4;
+        context.strokeStyle = 'rgba(0,0,0,.07)';
+        context.lineWidth = 1;
+        context.setLineDash(step ? [3, 4] : []);
+        context.beginPath(); context.moveTo(pad.left, y); context.lineTo(pad.left + width, y); context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = '#86868b';
+        context.textAlign = 'right';
+        context.fillText(String(Math.round(scoreMax * step / 4)), pad.left - 7, y);
+      }
+      const rollingPoints = [];
+      series.forEach((point, index) => {
+        const center = pad.left + slot * index + slot / 2;
+        const daily = Number(point.daily_score || 0);
+        const barWidth = Math.min(30, slot * .42);
+        const barHeight = daily / scoreMax * height;
+        if (barHeight > 0) {
+          const gradient = context.createLinearGradient(0, pad.top + height - barHeight, 0, pad.top + height);
+          gradient.addColorStop(0, '#ffb340'); gradient.addColorStop(1, '#ff7a00');
+          context.fillStyle = gradient;
+          roundedRect(context, center - barWidth / 2, pad.top + height - barHeight, barWidth, barHeight, 5);
+          context.fill();
+          context.fillStyle = '#424245';
+          context.textAlign = 'center';
+          context.fillText(formatNumber(daily), center, Math.max(9, pad.top + height - barHeight - 8));
+        }
+        const rolling = Number(point.rolling_score || 0);
+        rollingPoints.push({ x: center, y: pad.top + height - rolling / scoreMax * height });
+        context.fillStyle = '#86868b';
+        context.textAlign = 'center';
+        const dateParts = point.date.split('-');
+        context.fillText(Number(dateParts[1]) + '/' + Number(dateParts[2]), center, pad.top + height + 17);
+      });
+      if (rollingPoints.length) {
+        context.strokeStyle = '#ff3b30';
+        context.lineWidth = 2.2;
+        context.lineJoin = 'round';
+        context.lineCap = 'round';
+        context.beginPath();
+        rollingPoints.forEach((point, index) => {
+          if (!index) context.moveTo(point.x, point.y);
+          else context.lineTo(point.x, point.y);
+        });
+        context.stroke();
+        rollingPoints.forEach(point => {
+          context.fillStyle = '#fff'; context.strokeStyle = '#ff3b30'; context.lineWidth = 2;
+          context.beginPath(); context.arc(point.x, point.y, 3.6, 0, Math.PI * 2); context.fill(); context.stroke();
+        });
+      }
+      context.fillStyle = '#86868b';
+      context.textAlign = 'right';
+      context.fillText('积分', pad.left - 7, pad.top + height + 35);
+      return;
+    }
+
+    if (pickup) {
+      const countMaxRaw = Math.max(1, ...series.map(point => point.shipment_timeout_abnormal_count === null ? 0 : Number(point.shipment_timeout_abnormal_count || 0)));
+      const countMax = Math.ceil(countMaxRaw / 5) * 5 || 5;
+      const rateMaxRaw = Math.max(1, ...series.map(point => point.shipment_timeout_rate === null ? 0 : Number(point.shipment_timeout_rate || 0)));
+      const rateMax = Math.max(5, Math.ceil(rateMaxRaw / 5) * 5);
+      for (let step = 0; step <= 4; step += 1) {
+        const y = pad.top + height - height * step / 4;
+        context.strokeStyle = 'rgba(0,0,0,.07)';
+        context.lineWidth = 1;
+        context.setLineDash(step ? [3, 4] : []);
+        context.beginPath(); context.moveTo(pad.left, y); context.lineTo(pad.left + width, y); context.stroke();
+        context.setLineDash([]);
+        context.fillStyle = '#86868b';
+        context.textAlign = 'right';
+        context.fillText(String(Math.round(countMax * step / 4)), pad.left - 7, y);
+        context.textAlign = 'left';
+        context.fillText(String(Math.round(rateMax * step / 4)) + '%', pad.left + width + 7, y);
+      }
+      const ratePoints = [];
+      series.forEach((point, index) => {
+        const center = pad.left + slot * index + slot / 2;
+        const count = point.shipment_timeout_abnormal_count === null ? null : Number(point.shipment_timeout_abnormal_count || 0);
+        if (count !== null && count > 0) {
+          const barWidth = Math.min(30, slot * .42);
+          const barHeight = count / countMax * height;
+          const gradient = context.createLinearGradient(0, pad.top + height - barHeight, 0, pad.top + height);
+          gradient.addColorStop(0, '#45a6ff'); gradient.addColorStop(1, '#0071e3');
+          context.fillStyle = gradient;
+          roundedRect(context, center - barWidth / 2, pad.top + height - barHeight, barWidth, barHeight, 5);
+          context.fill();
+          context.fillStyle = '#424245';
+          context.textAlign = 'center';
+          context.fillText(formatNumber(count), center, Math.max(9, pad.top + height - barHeight - 8));
+        }
+        const rate = point.shipment_timeout_rate === null ? null : Number(point.shipment_timeout_rate || 0);
+        if (rate !== null) {
+          const current = { x: center, y: pad.top + height - rate / rateMax * height };
+          ratePoints.push(current);
+        }
+        context.fillStyle = '#86868b';
+        context.textAlign = 'center';
+        const dateParts = point.date.split('-');
+        context.fillText(Number(dateParts[1]) + '/' + Number(dateParts[2]), center, pad.top + height + 16);
+        if (point.score !== null) {
+          const score = Math.max(0, Math.min(2, Number(point.score || 0)));
+          const color = scoreColors[score] || scoreColors[0];
+          context.fillStyle = color;
+          context.beginPath(); context.arc(center, pad.top + height + 38, 8, 0, Math.PI * 2); context.fill();
+          context.fillStyle = '#fff';
+          context.fillText(String(score), center, pad.top + height + 38);
+        }
+      });
+      if (ratePoints.length) {
+        context.strokeStyle = '#ff9500';
+        context.lineWidth = 2.2;
+        context.lineJoin = 'round';
+        context.lineCap = 'round';
+        context.beginPath();
+        ratePoints.forEach((point, index) => {
+          if (!index) context.moveTo(point.x, point.y);
+          else {
+            const previous = ratePoints[index - 1];
+            const middle = (previous.x + point.x) / 2;
+            context.bezierCurveTo(middle, previous.y, middle, point.y, point.x, point.y);
+          }
+        });
+        context.stroke();
+        ratePoints.forEach(point => {
+          context.fillStyle = '#fff'; context.strokeStyle = '#ff9500'; context.lineWidth = 2;
+          context.beginPath(); context.arc(point.x, point.y, 3.6, 0, Math.PI * 2); context.fill(); context.stroke();
+        });
+      }
+      context.fillStyle = '#86868b';
+      context.textAlign = 'right';
+      context.fillText('扣分', pad.left - 7, pad.top + height + 38);
+      return;
+    }
+
+    for (let score = 0; score <= 2; score += 1) {
+      const y = pad.top + height - height * score / 2;
+      context.strokeStyle = 'rgba(0,0,0,.07)';
+      context.lineWidth = 1;
+      context.setLineDash(score ? [3, 4] : []);
+      context.beginPath(); context.moveTo(pad.left, y); context.lineTo(pad.left + width, y); context.stroke();
+      context.setLineDash([]);
+      context.fillStyle = '#86868b';
+      context.textAlign = 'right';
+      context.fillText(String(score), pad.left - 7, y);
+    }
+    let previous = null;
+    series.forEach((point, index) => {
+      const center = pad.left + slot * index + slot / 2;
+      context.fillStyle = '#86868b';
+      context.textAlign = 'center';
+      const dateParts = point.date.split('-');
+      context.fillText(Number(dateParts[1]) + '/' + Number(dateParts[2]), center, pad.top + height + 17);
+      if (point.score === null) {
+        previous = null;
+        return;
+      }
+      const score = Math.max(0, Math.min(2, Number(point.score || 0)));
+      const current = { x: center, y: pad.top + height - height * score / 2 };
+      if (previous) {
+        context.strokeStyle = '#ff3b30';
+        context.lineWidth = 2.2;
+        context.lineJoin = 'round';
+        context.beginPath(); context.moveTo(previous.x, previous.y); context.lineTo(current.x, current.y); context.stroke();
+      }
+      context.fillStyle = '#fff'; context.strokeStyle = scoreColors[score]; context.lineWidth = 2;
+      context.beginPath(); context.arc(current.x, current.y, 4, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = scoreColors[score];
+      context.textAlign = 'center';
+      context.fillText(String(score), center, Math.max(9, current.y - 11));
+      previous = current;
+    });
+  }
   function renderDailyAnalysis() {
     const rows = top10Rows();
     setText('#analysisTitle', `${state.platform} · ${state.date || '—'} 当日分析`);

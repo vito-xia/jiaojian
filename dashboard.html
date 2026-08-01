@@ -21,6 +21,7 @@
       <div class="nav-links" aria-label="页面模块">
         <a id="platformControlNav" href="#platform-control">平台预警与管控</a>
         <a href="#delivery-warning">交件预警</a>
+        <a id="deliveryScoreNav" href="#delivery-score-monitor" hidden>派送积分监控</a>
       </div>
       <div class="freshness" id="freshness"><span class="live-dot"></span>数据载入中</div>
     </div>
@@ -189,6 +190,59 @@
       </article>
      </section>
 
+    <section class="content-section" id="delivery-score-monitor" hidden>
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker"><span class="kicker-index blue">03</span>派送监控</div>
+          <h2>派送积分监控</h2>
+          <p>独立读取⑥派送积分监控，按交件积分口径累计派送积分，详情展示最近 15 天扣分；虚假签收不纳入本模块。</p>
+        </div>
+        <div class="section-status"><span class="status-dot active"></span><span id="deliveryScoreStatus">派送数据载入中</span></div>
+      </div>
+      <div class="platform-search-bar">
+        <div class="platform-search-copy">
+          <span>模块检索</span>
+          <strong>搜索派送管控与积分网点</strong>
+          <small>搜索网点、编码、地区、异常等级或管控状态</small>
+        </div>
+        <div class="platform-search-control">
+          <label class="branch-search-input platform-search-input" for="deliverySearch">
+            <span class="search-glyph" aria-hidden="true"></span>
+            <input id="deliverySearch" type="search" autocomplete="off" placeholder="搜索派送网点、编码或管控状态">
+            <button id="clearDeliverySearch" type="button" hidden>清除</button>
+          </label>
+          <span class="platform-search-hint" id="deliverySearchHint">输入关键词筛选派送监控</span>
+        </div>
+      </div>
+      <div class="split-grid" id="deliveryScorePanels">
+        <article class="data-card panel-card">
+          <div class="panel-title">
+            <div><span class="panel-label">最近 7 天</span><h3>每日派送管控</h3></div>
+            <span class="record-count" id="deliveryControlCount">0 条</span>
+          </div>
+          <div class="table-scroll compact-scroll">
+            <table class="data-table compact-table delivery-control-table">
+              <thead><tr><th>管控日期</th><th>网点名称</th><th>管控动作</th><th>滚动派送积分</th><th>管控类型</th><th>预计完结</th></tr></thead>
+              <tbody id="deliveryControlBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="deliveryControlPagination" aria-label="每日派送管控分页"></div>
+        </article>
+        <article class="data-card panel-card">
+          <div class="panel-title">
+            <div><span class="panel-label warning">风险阈值 ≥ 12</span><h3>高积分停滞网点</h3></div>
+            <span class="record-count" id="deliveryHighScoreCount">0 条</span>
+          </div>
+          <div class="table-scroll compact-scroll">
+            <table class="data-table compact-table delivery-score-table">
+              <thead><tr><th>网点名称</th><th>滚动派送积分</th><th>最近扣分</th><th>最近违规日期</th><th>异常等级</th></tr></thead>
+              <tbody id="deliveryHighScoreBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination" id="deliveryHighScorePagination" aria-label="高积分停滞网点分页"></div>
+        </article>
+      </div>
+    </section>
     <section class="methodology" aria-label="口径说明">
       <div class="method-copy">
         <span class="method-icon">i</span>
@@ -222,6 +276,7 @@
         <button class="close-button" id="closeDrawer" type="button" aria-label="关闭">×</button>
       </div>
       <div class="drawer-summary" id="drawerSummary"></div>
+      <div class="drawer-score-trend" id="drawerScoreTrend" hidden></div>
       <div class="drawer-history" id="drawerHistory"></div>
       <div class="drawer-charts" id="drawerCharts"></div>
     </aside>
@@ -229,7 +284,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=11"></script>
-  <script src="assets/dashboard.js?v=11"></script>
+  <script src="data/dashboard_bundle.js?v=14"></script>
+  <script src="assets/dashboard.js?v=14"></script>
 </body>
 </html>
