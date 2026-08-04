@@ -5,7 +5,9 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1 };
+  const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1 });
+  const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate };
   let chartJobs = [];
   let toastTimer = null;
 
@@ -19,6 +21,8 @@
     const amount = Number(value || 0);
     return `${amount.toLocaleString('zh-CN', { minimumFractionDigits: amount && amount < 1 ? 2 : 1, maximumFractionDigits: 2 })}%`;
   }
+  function formatOptionalNumber(value) { return value === null || value === undefined ? '—' : formatNumber(value); }
+  function formatOptionalRate(value) { return value === null || value === undefined ? '—' : formatRate(value); }
   function shortDate(value) { return value ? String(value).slice(0, 10) : '—'; }
   function monthLabel(value) {
     const [year, month] = String(value).split('-');
@@ -112,6 +116,88 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 2300);
   }
 
+  function restoreJdThresholds() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(JD_THRESHOLD_STORAGE_KEY) || '{}');
+      const count = Number(saved.count);
+      const rate = Number(saved.rate);
+      if (Number.isFinite(count) && count >= 0) state.jdThresholdCount = Math.round(count);
+      if (Number.isFinite(rate) && rate >= 0) state.jdThresholdRate = Math.round(rate * 10000) / 10000;
+    } catch {
+      state.jdThresholdCount = JD_THRESHOLD_DEFAULTS.count;
+      state.jdThresholdRate = JD_THRESHOLD_DEFAULTS.rate;
+    }
+  }
+
+  function persistJdThresholds() {
+    try {
+      window.localStorage.setItem(JD_THRESHOLD_STORAGE_KEY, JSON.stringify({ count: state.jdThresholdCount, rate: state.jdThresholdRate }));
+    } catch {
+      // file:// 或受限浏览器禁用本地存储时，仍保留当前会话内的阈值。
+    }
+  }
+
+  function syncJdThresholdInputs() {
+    const countInput = $('#jdCountThreshold');
+    const rateInput = $('#jdRateThreshold');
+    if (countInput) countInput.value = String(state.jdThresholdCount);
+    if (rateInput) rateInput.value = String(state.jdThresholdRate);
+  }
+
+  function updateJdThresholdsFromInputs() {
+    const count = $('#jdCountThreshold')?.valueAsNumber;
+    const rate = $('#jdRateThreshold')?.valueAsNumber;
+    if (!Number.isFinite(count) || count < 0 || !Number.isFinite(rate) || rate < 0) return;
+    state.jdThresholdCount = Math.round(count);
+    state.jdThresholdRate = Math.round(rate * 10000) / 10000;
+    persistJdThresholds();
+    renderTop10();
+  }
+
+  function jdRankingWindowDates() {
+    return dayRange(state.date, 8);
+  }
+
+  function jdCustomerTrend(row) {
+    const customers = data.trends?.['京东']?.[row.branch]?.customers || [];
+    const customerCode = String(row.customer_code || '').trim();
+    if (customerCode) {
+      const codeMatch = customers.find(customer => String(customer.customer_code || '').trim() === customerCode);
+      if (codeMatch) return codeMatch;
+    } else {
+      const blankCodeMatch = customers.find(customer => customer.customer === row.customer && !String(customer.customer_code || '').trim());
+      if (blankCodeMatch) return blankCodeMatch;
+    }
+    return customers.find(customer => customer.customer === row.customer);
+  }
+
+  function jdRankingCount(row) {
+    const windowDates = new Set(jdRankingWindowDates());
+    const customer = jdCustomerTrend(row);
+    if (!customer) return 0;
+    return (customer.series || []).filter(point => (
+      windowDates.has(point.date)
+      && point.timeout_rate_48h !== null
+      && point.timeout_rate_48h !== undefined
+      && Number(point.timeout_48h || 0) >= state.jdThresholdCount
+      && Number(point.timeout_rate_48h) >= state.jdThresholdRate
+    )).length;
+  }
+
+  function rankingCountChip(count) {
+    const kind = count >= 4 ? ' frequent' : count > 0 ? ' active' : '';
+    return `<span class="ranking-count${kind}" title="最近8个自然日命中阈值的天数">${count}次</span>`;
+  }
+
+  function renderJdThresholdControls(active) {
+    const controls = $('#jdThresholdControls');
+    if (!controls) return;
+    controls.hidden = !active;
+    if (!active) return;
+    const range = jdRankingWindowDates();
+    setText('#jdThresholdWindow', `${range[0] || '—'} 至 ${range.at(-1) || '—'} · 8个自然日`);
+  }
+
 
   function initialize() {
     if (!data?.meta || !data?.platforms) {
@@ -121,6 +207,8 @@
     }
     const dates = datesForPlatform();
     state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
+    restoreJdThresholds();
+    syncJdThresholdInputs();
     bindEvents();
     renderDateSelector();
     renderAll();
@@ -243,6 +331,21 @@
       renderBranchSearch();
       $('#branchSearch').focus();
     });
+    const jdCountInput = $('#jdCountThreshold');
+    const jdRateInput = $('#jdRateThreshold');
+    [jdCountInput, jdRateInput].forEach(input => {
+      input.addEventListener('input', updateJdThresholdsFromInputs);
+      input.addEventListener('change', syncJdThresholdInputs);
+    });
+    $('#resetJdThresholds').addEventListener('click', () => {
+      state.jdThresholdCount = JD_THRESHOLD_DEFAULTS.count;
+      state.jdThresholdRate = JD_THRESHOLD_DEFAULTS.rate;
+      syncJdThresholdInputs();
+      persistJdThresholds();
+      renderTop10();
+      showToast('京东上榜阈值已恢复为 20票 / 1%');
+    });
+
     $('#previousDate').addEventListener('click', () => moveDate(-1));
     $('#nextDate').addEventListener('click', () => moveDate(1));
     document.addEventListener('click', event => {
@@ -330,8 +433,11 @@
 
   function renderKpis() {
     const rows = top10Rows();
-    const total = rows.reduce((sum, row) => sum + Number(row.timeout_36h || 0), 0);
+    const jd = state.platform === '京东';
+    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
+    const total = rows.reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
     const branches = new Set(rows.map(row => row.branch)).size;
+    setText('.kpi-primary > p', `TOP10 · ${jd ? '48H' : '36H'}超时量`);
     setText('#kpiTimeout', formatNumber(total));
     setText('#kpiBranches', `${branches}`);
     setText('#kpiTimeoutNote', `${state.date || '—'} · ${currentDataLabel()} 客户合计`);
@@ -360,6 +466,7 @@
     const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
     if (!normalized) return { total: 0, rows: [] };
     const range = new Set(dayRange(state.date, 15));
+    const timeoutField = state.platform === '京东' ? 'timeout_48h' : 'timeout_36h';
     const source = data.trends?.[state.platform] || {};
     const rows = Object.entries(source).filter(([branch, branchData]) => {
       const customers = (branchData?.customers || []).map(item => `${item.customer || ''} ${item.customer_code || ''}`).join(' ');
@@ -370,8 +477,8 @@
         const points = (customer.series || []).filter(point => range.has(point.date));
         return { customer, points };
       }).filter(item => item.points.length);
-      const weekTotal = activeCustomers.reduce((sum, item) => sum + item.points.reduce((subtotal, point) => subtotal + Number(point.timeout_36h || 0), 0), 0);
-      const latestTotal = activeCustomers.reduce((sum, item) => sum + Number(item.points.find(point => point.date === state.date)?.timeout_36h || 0), 0);
+      const weekTotal = activeCustomers.reduce((sum, item) => sum + item.points.reduce((subtotal, point) => subtotal + Number(point[timeoutField] || 0), 0), 0);
+      const latestTotal = activeCustomers.reduce((sum, item) => sum + Number(item.points.find(point => point.date === state.date)?.[timeoutField] || 0), 0);
       const lastActiveDate = activeCustomers.flatMap(item => item.points.map(point => point.date)).sort().at(-1) || '';
       const lowerBranch = branch.toLocaleLowerCase('zh-CN');
       return {
@@ -412,27 +519,36 @@
     results.innerHTML = `<div class="branch-search-results-head"><div><span>SEARCH RESULTS</span><strong>${escapeHtml(query)}</strong></div><p>${matches.total > matches.rows.length ? `共 ${matches.total} 个匹配，优先展示窗口超时量最高的 ${matches.rows.length} 个` : `共 ${matches.total} 个匹配网点`}</p></div>
       <div class="branch-search-results-grid">${matches.rows.map(row => `<button class="branch-search-result js-branch" type="button" data-branch="${encodeName(row.branch)}">
         <span class="branch-search-name"><strong title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}</strong><small title="${escapeHtml(row.parent)}">一级公司 · ${escapeHtml(row.parent)}</small></span>
-        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>${currentDataLabel()} 36H</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>${trendWindowLabel()} 36H</small></span><span><b>${formatNumber(row.customerCount)}</b><small>窗口客户</small></span></span>
+        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>${currentDataLabel()} ${state.platform === '京东' ? '48H' : '36H'}</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>${trendWindowLabel()} ${state.platform === '京东' ? '48H' : '36H'}</small></span><span><b>${formatNumber(row.customerCount)}</b><small>窗口客户</small></span></span>
         <span class="branch-search-open">${row.lastActiveDate ? `最近数据 ${shortDate(row.lastActiveDate)}` : '最近15天暂无数据'}<i>查看趋势</i></span>
       </button>`).join('')}</div>`;
   }
   function renderTop10() {
     const rows = top10Rows();
     const douyin = state.platform === '抖音';
+    const jd = state.platform === '京东';
+    renderJdThresholdControls(jd);
     const table = $('#top10Table');
-    table.style.minWidth = douyin ? '1500px' : '1120px';
+    table.style.minWidth = douyin ? '1500px' : jd ? '1200px' : '1120px';
     table.classList.toggle('douyin-columns', douyin);
+    table.classList.toggle('jd-columns', jd);
     $('#top10Head').innerHTML = douyin
       ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
-      : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
+      : jd
+        ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>36H超时量</th><th>36H超时率</th><th>48H超时量</th><th>48H超时率</th><th>上榜次数</th><th>发运兜底</th></tr>'
+        : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
     if (!rows.length) {
       const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
-      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
+      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 11 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
     } else {
       $('#top10Body').innerHTML = rows.map(row => {
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
-        const common = `<td>${rankBadge(row.rank)}</td><td>${branchButton(row.branch, row.parent_name)}</td><td>${customer}</td><td><span class="metric-number">${formatNumber(row.timeout_36h)}</span></td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td>`;
+        const identity = `<td>${rankBadge(row.rank)}</td><td>${branchButton(row.branch, row.parent_name)}</td><td>${customer}</td>`;
+        if (jd) {
+          return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td>${formatNumber(row.timeout_36h)}</td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(row.timeout_rate_48h)}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
+        }
+        const common = `${identity}<td><span class="metric-number">${formatNumber(row.timeout_36h)}</span></td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td>`;
         if (!douyin) {
           return `<tr>${common}<td>${formatNumber(row.timeout_24h)}</td><td>${formatNumber(row.timeout_48h)}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td><td>${historyStack(row.history_shortage)}</td></tr>`;
         }
@@ -440,12 +556,14 @@
       }).join('');
     }
 
-    setText('#warningStatus', douyin ? '聚焦最高风险客户' : '内部交件预警');
-    setText('#top10Caption', douyin ? '按 36H 交件超时量降序 · 平台风险字段已联动' : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
+    setText('#warningStatus', douyin ? '聚焦最高风险客户' : jd ? '聚焦 48H 最高风险' : '内部交件预警');
+    setText('#top10Caption', douyin ? '按 36H 交件超时量降序 · 平台风险字段已联动' : jd ? `按 ${currentDataLabel()} 48H 交件超时量降序 · 上榜阈值 ≥${formatNumber(state.jdThresholdCount)}票且 ≥${formatNumber(state.jdThresholdRate)}%` : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
     $('#topLegend').hidden = !douyin;
     $('#top10Footnote').textContent = douyin
       ? '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
-      : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
+      : jd
+        ? '发货量 = 36H超时量 ÷ (36H超时率 / 100)，四舍五入取整；48H超时率 = 48H超时量 ÷ 发货量。上榜次数按所选数据日向前共 8 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。'
+        : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
   }
 
   function renderPlatformModule() {
@@ -642,6 +760,7 @@
   function renderBranchScoreTrend(branch, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
+    panel.classList.remove('jd-analysis-panel');
     const scenes = ['物流停滞-揽收端', '物流停滞-全链路'];
     const branchScenes = data.branch_score_trends?.[branch] || {};
     const availableScenes = scenes.filter(scene => (branchScenes[scene] || []).length);
@@ -690,9 +809,73 @@
       requestAnimationFrame(draw);
     }
   }
+  function renderJdBranchAnalysis(branch, customers, range) {
+    const panel = $('#drawerScoreTrend');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.classList.add('jd-analysis-panel');
+    const daily = range.map(date => {
+      const entries = customers.map(customer => ({
+        customer,
+        point: customer.series.find(point => point.date === date && point.hasSourcePoint)
+      })).filter(entry => entry.point);
+      const shipmentVolume = entries.reduce((sum, entry) => sum + Number(entry.point.shipment_volume || 0), 0);
+      const timeout48h = entries.reduce((sum, entry) => sum + Number(entry.point.timeout_48h || 0), 0);
+      return {
+        date,
+        entries,
+        customerCount: entries.length,
+        shipmentVolume,
+        timeout48h,
+        timeoutRate48h: shipmentVolume ? timeout48h / shipmentVolume * 100 : null
+      };
+    });
+    const activeDays = daily.filter(day => day.customerCount);
+    const latest = activeDays.at(-1);
+    const previous = activeDays.at(-2);
+
+    if (!latest) {
+      panel.innerHTML = `<div class="jd-analysis-head"><div><span>RECENT INSIGHT</span><h3>全部客户近期分析</h3><p>${escapeHtml(branch)} · ${escapeHtml(range[0] || '—')} — ${escapeHtml(range.at(-1) || '—')}</p></div></div><div class="jd-analysis-empty">最近 15 天暂无可分析的京东客户数据。</div>`;
+      return;
+    }
+
+    const delta = previous ? latest.timeout48h - previous.timeout48h : null;
+    const tone = delta === null || delta === 0 ? 'neutral' : delta < 0 ? 'good' : 'risk';
+    const statusCopy = delta === null ? '首个数据日' : delta < 0 ? '较前期改善' : delta > 0 ? '较前期上升' : '较前期持平';
+    const ranked = [...latest.entries].sort((a, b) => Number(b.point.timeout_48h || 0) - Number(a.point.timeout_48h || 0));
+    const topEntry = ranked[0];
+    const topAmount = Number(topEntry?.point.timeout_48h || 0);
+    const topShare = latest.timeout48h ? topAmount / latest.timeout48h * 100 : 0;
+    const highestRateEntry = [...latest.entries].filter(entry => entry.point.timeout_rate_48h !== null && entry.point.timeout_rate_48h !== undefined)
+      .sort((a, b) => Number(b.point.timeout_rate_48h || 0) - Number(a.point.timeout_rate_48h || 0))[0];
+    const cards = [
+      ['最新48H超时量', formatNumber(latest.timeout48h), latest.date],
+      ['最新发货量', formatNumber(latest.shipmentVolume), '全部客户估算合计'],
+      ['最新48H超时率', formatOptionalRate(latest.timeoutRate48h), '按合计发货量计算'],
+      ['涉及客户', `${latest.customerCount}个`, '最近数据日有记录']
+    ];
+    const insights = [
+      `${latest.date} 全部 ${latest.customerCount} 个客户的 48H 超时量为 ${formatNumber(latest.timeout48h)} 单，估算发货量 ${formatNumber(latest.shipmentVolume)}，综合 48H 超时率 ${formatOptionalRate(latest.timeoutRate48h)}。`,
+      previous
+        ? `较上一有效数据日 ${previous.date}，48H 超时量${delta < 0 ? '减少' : delta > 0 ? '增加' : '持平'}${delta === 0 ? '' : ` ${formatNumber(Math.abs(delta))} 单`}。`
+        : '当前仅有一个有效数据日，暂不做环比判断。',
+      topEntry
+        ? `48H 超时量最高的客户是“${topEntry.customer.customer || '未命名客户'}”，共 ${formatNumber(topAmount)} 单，占该网点当日 48H 超时量的 ${topShare.toFixed(1)}%。`
+        : '最近数据日暂无客户产生 48H 超时。',
+      highestRateEntry
+        ? `48H 超时率最高的客户是“${highestRateEntry.customer.customer || '未命名客户'}”，为 ${formatOptionalRate(highestRateEntry.point.timeout_rate_48h)}。`
+        : '最近数据日缺少可计算的 48H 超时率。'
+    ];
+
+    panel.innerHTML = `<div class="jd-analysis-head"><div><span>RECENT INSIGHT</span><h3>全部客户近期分析</h3><p>${escapeHtml(branch)} · 最近有效数据 ${escapeHtml(latest.date)}</p></div><span class="jd-analysis-status ${tone}">${escapeHtml(statusCopy)}</span></div>
+      <div class="jd-analysis-metrics">${cards.map(([label, value, note]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`).join('')}</div>
+      <div class="jd-analysis-insights"><h4>观察结论</h4><ul>${insights.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
+  }
+
   function renderDeliveryScoreTrend(branch, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
+    panel.classList.remove('jd-analysis-panel');
     const source = deliveryMonitor().trends?.[branch]?.series || [];
     const byDate = new Map(source.map(point => [point.date, point]));
     const series = range.map(date => byDate.get(date) || { date, daily_score: 0, rolling_score: 0 });
@@ -748,31 +931,48 @@
       openDeliveryDrawer(branch);
       return;
     }
+    const jd = state.platform === '京东';
+    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
     const branchData = data.trends?.[state.platform]?.[branch];
     const parent = branchData?.parent_name || branchRisk(branch).parent_name || branch;
     const range = dayRange(state.date, 15);
     const customers = (branchData?.customers || []).map(customer => {
       const byDate = new Map(customer.series.map(point => [point.date, point]));
-      const series = range.map(day => byDate.get(day) || { date: day, timeout_36h: 0, timeout_rate_36h: 0 });
-      const hasSourcePoint = series.some(point => byDate.has(point.date));
-      const total = series.reduce((sum, point) => sum + Number(point.timeout_36h || 0), 0);
+      const series = range.map(day => {
+        const sourcePoint = byDate.get(day);
+        return sourcePoint
+          ? { ...sourcePoint, hasSourcePoint: true }
+          : { date: day, timeout_36h: 0, timeout_rate_36h: 0, timeout_48h: 0, timeout_rate_48h: null, shipment_volume: null, shipment_interval: '无法计算', hasSourcePoint: false };
+      });
+      const hasSourcePoint = series.some(point => point.hasSourcePoint);
+      const total = series.reduce((sum, point) => sum + Number(point[timeoutField] || 0), 0);
       return { ...customer, series, total, hasSourcePoint };
     }).filter(customer => customer.hasSourcePoint).sort((a, b) => b.total - a.total);
     const risk = branchRisk(branch);
     const branchTop5Supported = state.platform === '抖音' || state.platform === '淘宝';
     const branchTop5Rows = branchTop5Supported ? (data.branch_top5_data?.[state.platform]?.[branch] || []) : [];
-    const latestTotal = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.timeout_36h || 0), 0);
+    const latestTotal = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.[timeoutField] || 0), 0);
+    const latestShipmentVolume = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.shipment_volume || 0), 0);
+    const latestRate48h = latestShipmentVolume ? latestTotal / latestShipmentVolume * 100 : null;
     const weekTotal = customers.reduce((sum, customer) => sum + customer.total, 0);
+    const summaryItems = jd
+      ? [
+        ['窗口客户', `${customers.length}个`],
+        ['15天48H超时', formatNumber(weekTotal)],
+        [`${currentDataLabel()} 48H超时`, formatNumber(latestTotal)],
+        [`${currentDataLabel()} 48H超时率`, formatOptionalRate(latestRate48h)]
+      ]
+      : [
+        ['窗口客户', `${customers.length}个`],
+        ['15天36H超时', formatNumber(weekTotal)],
+        [`${currentDataLabel()} 36H超时`, formatNumber(latestTotal)],
+        [state.platform === '抖音' ? '当前停滞积分' : '分部上榜记录', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${branchTop5Rows.length}条`]
+      ];
 
     setText('#drawerKicker', `${state.platform} · ${trendWindowLabel()}`);
     setText('#drawerTitle', branch);
     setText('#drawerParent', `一级公司 · ${parent}`);
-    $('#drawerSummary').innerHTML = [
-      ['窗口客户', `${customers.length}个`],
-      ['15天36H超时', formatNumber(weekTotal)],
-      [`${currentDataLabel()} 36H超时`, formatNumber(latestTotal)],
-      [state.platform === '抖音' ? '当前停滞积分' : '分部上榜记录', state.platform === '抖音' ? formatNumber(risk.stagnant_score || 0) : `${branchTop5Rows.length}条`]
-    ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    $('#drawerSummary').innerHTML = summaryItems.map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
 
     const historyPanel = $('#drawerHistory');
     historyPanel.hidden = !branchTop5Supported;
@@ -792,18 +992,22 @@
     }
     $('#drawerCharts').hidden = false;
     chartJobs = [];
-    renderBranchScoreTrend(branch, range);
+    if (jd) renderJdBranchAnalysis(branch, customers, range);
+    else renderBranchScoreTrend(branch, range);
     if (!customers.length) {
       $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
     } else {
       $('#drawerCharts').innerHTML = `<div class="charts-heading"><h3>全部客户趋势</h3><span>${trendWindowLabel()} · ${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示</span></div>${customers.map((customer, index) => {
         const latest = customer.series.at(-1);
-        return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latest.timeout_rate_36h)}</p></div><div class="chart-stat"><strong>${formatNumber(customer.total)}</strong><span>${trendWindowLabel()} 36H超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>36H超时量</span><span><i class="line"></i>36H超时率</span></div></article>`;
+        const detail = jd
+          ? `发货量 · ${formatOptionalNumber(latest.shipment_volume)} · ${escapeHtml(latest.shipment_interval || '无法计算')} · ${currentDataLabel()} 48H超时率 ${formatOptionalRate(latest.timeout_rate_48h)}`
+          : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latest.timeout_rate_36h)}`;
+        return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(customer.total)}</strong><span>${trendWindowLabel()} ${jd ? '48H' : '36H'}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${jd ? '48H' : '36H'}超时量</span><span><i class="line"></i>${jd ? '48H' : '36H'}超时率</span></div></article>`;
       }).join('')}`;
       requestAnimationFrame(() => {
         customers.forEach((customer, index) => {
           const canvas = $(`#chart-${index}`);
-          const draw = () => drawComboChart(canvas, customer.series);
+          const draw = () => drawComboChart(canvas, customer.series, jd ? 'timeout_48h' : 'timeout_36h', jd ? 'timeout_rate_48h' : 'timeout_rate_36h');
           chartJobs.push({ kind: 'customer', canvas, draw });
           draw();
         });
@@ -835,7 +1039,7 @@
     context.arcTo(x, y, x + width, y, r);
     context.closePath();
   }
-  function drawComboChart(canvas, series) {
+  function drawComboChart(canvas, series, countField = 'timeout_36h', rateField = 'timeout_rate_36h') {
     if (!canvas || !canvas.isConnected) return;
     const cssWidth = Math.max(320, canvas.clientWidth || 740);
     const cssHeight = Math.max(200, canvas.clientHeight || 228);
@@ -848,9 +1052,9 @@
     const pad = { top: 25, right: 43, bottom: 32, left: 45 };
     const width = cssWidth - pad.left - pad.right;
     const height = cssHeight - pad.top - pad.bottom;
-    const barMaxRaw = Math.max(1, ...series.map(point => Number(point.timeout_36h || 0)));
+    const barMaxRaw = Math.max(1, ...series.map(point => Number(point[countField] || 0)));
     const barMax = Math.ceil(barMaxRaw / 5) * 5 || 5;
-    const rateMaxRaw = Math.max(1, ...series.map(point => Number(point.timeout_rate_36h || 0)));
+    const rateMaxRaw = Math.max(1, ...series.map(point => Number(point[rateField] || 0)));
     const rateMax = Math.max(5, Math.ceil(rateMaxRaw / 5) * 5);
     context.font = '9px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
     context.textBaseline = 'middle';
@@ -874,7 +1078,7 @@
     const points = [];
     series.forEach((point, index) => {
       const center = pad.left + slot * index + slot / 2;
-      const value = Number(point.timeout_36h || 0);
+      const value = Number(point[countField] || 0);
       const barHeight = value / barMax * height;
       if (barHeight > 0) {
         const gradient = context.createLinearGradient(0, pad.top + height - barHeight, 0, pad.top + height);
@@ -886,7 +1090,7 @@
         context.textAlign = 'center';
         context.fillText(formatNumber(value), center, Math.max(9, pad.top + height - barHeight - 8));
       }
-      const rate = Number(point.timeout_rate_36h || 0);
+      const rate = Number(point[rateField] || 0);
       points.push({ x: center, y: pad.top + height - rate / rateMax * height, rate });
       context.fillStyle = '#86868b';
       context.textAlign = 'center';
@@ -1112,8 +1316,12 @@
   }
   function renderDailyAnalysis() {
     const rows = top10Rows();
+    const jd = state.platform === '京东';
+    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
+    const rateField = jd ? 'timeout_rate_48h' : 'timeout_rate_36h';
+    const metricHours = jd ? '48H' : '36H';
     setText('#analysisTitle', `${state.platform} · ${state.date || '—'} 当日分析`);
-    setText('#analysisSubtitle', `${currentDataLabel()} 数据口径 · 仅分析页面所示 TOP10 客户，切换平台或日期后自动更新。`);
+    setText('#analysisSubtitle', `${currentDataLabel()} 数据口径 · 仅分析页面所示 TOP10 客户，${jd ? '京东采用 48H 口径，' : ''}切换平台或日期后自动更新。`);
     const status = $('#analysisStatus');
     const content = $('#analysisContent');
     if (!rows.length) {
@@ -1123,16 +1331,16 @@
       return;
     }
 
-    const total = rows.reduce((sum, row) => sum + Number(row.timeout_36h || 0), 0);
+    const total = rows.reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
     const branchCount = new Set(rows.map(row => row.branch)).size;
-    const sorted = [...rows].sort((a, b) => Number(b.timeout_36h || 0) - Number(a.timeout_36h || 0));
-    const top3Total = sorted.slice(0, 3).reduce((sum, row) => sum + Number(row.timeout_36h || 0), 0);
+    const sorted = [...rows].sort((a, b) => Number(b[timeoutField] || 0) - Number(a[timeoutField] || 0));
+    const top3Total = sorted.slice(0, 3).reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
     const top3Share = total ? top3Total / total * 100 : 0;
     const dates = datesForPlatform();
     const dateIndex = dates.indexOf(state.date);
     const previousDate = dateIndex > 0 ? dates[dateIndex - 1] : '';
     const previousRows = previousDate ? (data.platforms?.[state.platform]?.top10_by_date?.[previousDate] || []) : [];
-    const previousTotal = previousRows.reduce((sum, row) => sum + Number(row.timeout_36h || 0), 0);
+    const previousTotal = previousRows.reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
     const delta = previousDate ? total - previousTotal : null;
     const deltaPercent = previousDate && previousTotal ? delta / previousTotal * 100 : null;
     const tone = delta === null || delta === 0 ? 'neutral' : delta < 0 ? 'good' : 'risk';
@@ -1141,20 +1349,20 @@
     status.textContent = statusCopy;
 
     const topCustomer = sorted[0];
-    const highestRate = [...rows].sort((a, b) => Number(b.timeout_rate_36h || 0) - Number(a.timeout_rate_36h || 0))[0];
+    const highestRate = [...rows].sort((a, b) => Number(b[rateField] || 0) - Number(a[rateField] || 0))[0];
     const concentration = top3Share >= 60 ? '风险高度集中' : top3Share >= 40 ? '风险相对集中' : '风险较分散';
     const deltaValue = delta === null ? '—' : `${delta > 0 ? '+' : ''}${formatNumber(delta)}`;
     const deltaNote = !previousDate ? '无上一数据日' : deltaPercent === null ? `${previousDate} 基数为 0` : `${previousDate} · ${deltaPercent > 0 ? '+' : ''}${deltaPercent.toFixed(1)}%`;
     const cards = [
-      ['TOP10 36H超时量', formatNumber(total), `${rows.length} 个客户`],
+      [`TOP10 ${metricHours}超时量`, formatNumber(total), `${rows.length} 个客户`],
       ['涉及分部', formatNumber(branchCount), '按分部名称去重'],
       ['前三客户占比', `${top3Share.toFixed(1)}%`, concentration],
       ['较前一数据日', deltaValue, deltaNote]
     ];
     const insights = [
-      `当日 TOP10 的 36H 超时量合计 ${formatNumber(total)}，覆盖 ${branchCount} 个分部。`,
+      `当日 TOP10 的 ${metricHours} 超时量合计 ${formatNumber(total)}，覆盖 ${branchCount} 个分部。`,
       `前三客户贡献 ${formatNumber(top3Total)} 单，占 TOP10 的 ${top3Share.toFixed(1)}%，${concentration}。`,
-      `超时量最高的是“${topCustomer.customer || '未命名客户'}”（${topCustomer.branch || '未标注分部'}），共 ${formatNumber(topCustomer.timeout_36h)} 单；最高超时率为“${highestRate.customer || '未命名客户'}”的 ${formatRate(highestRate.timeout_rate_36h)}。`
+      `超时量最高的是“${topCustomer.customer || '未命名客户'}”（${topCustomer.branch || '未标注分部'}），共 ${formatNumber(topCustomer[timeoutField])} 单；最高超时率为“${highestRate.customer || '未命名客户'}”的 ${formatOptionalRate(highestRate[rateField])}。`
     ];
     if (previousDate) {
       insights.push(`较上一数据日 ${previousDate}，TOP10 超时量${delta < 0 ? '减少' : delta > 0 ? '增加' : '持平'}${delta === 0 ? '' : ` ${formatNumber(Math.abs(delta))} 单`}。`);
@@ -1163,6 +1371,8 @@
     }
     if (state.platform === '抖音') {
       insights.push(`联动风险：滚动 16 天达到 6 分及以上的网点 ${currentScores().length} 个，近 7 天平台管控动作 ${currentControls().length} 条。`);
+    } else if (jd) {
+      insights.push('京东当前按 48H 内部交件预警分析；发货量由 36H 超时量与 36H 超时率反推，停滞积分和抖音平台管控不参与结论。');
     } else {
       insights.push(`${state.platform}当前仅按内部交件预警分析，停滞积分和抖音平台管控不参与该平台结论。`);
     }
