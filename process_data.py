@@ -58,6 +58,36 @@ def integer(value: Any) -> int:
     return int(round(number(value)))
 
 
+def shipment_interval(value: int | None) -> str:
+    if value is None:
+        return "无法计算"
+    if value <= 50:
+        return "50以内"
+    if value <= 100:
+        return "50-100"
+    if value <= 300:
+        return "100-300"
+    if value <= 500:
+        return "300-500"
+    if value <= 1000:
+        return "500-1000"
+    if value <= 5000:
+        return "1000-5000"
+    return "5000+"
+
+
+def jd_delivery_metrics(timeout_36h: int, timeout_rate_36h: float, timeout_48h: int) -> dict[str, Any]:
+    """京东派生口径：源表超时率为百分点，计算时需先除以 100。"""
+    rate = number(timeout_rate_36h)
+    shipment_volume = int(round(timeout_36h * 100 / rate)) if rate > 0 else None
+    timeout_rate_48h = round(timeout_48h / shipment_volume * 100, 4) if shipment_volume else None
+    return {
+        "shipment_volume": shipment_volume,
+        "shipment_interval": shipment_interval(shipment_volume),
+        "timeout_rate_48h": timeout_rate_48h,
+    }
+
+
 def customer_is_excluded(customer_name: Any) -> bool:
     name = text(customer_name)
     return any(keyword in name for keyword in EXCLUDED_CUSTOMER_KEYWORDS)
@@ -170,7 +200,7 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
         for row in sheet.iter_rows(min_row=3, values_only=True):
             if not row or text(row[1] if len(row) > 1 else "") in ("", "合计"):
                 continue
-            records.append({
+            record = {
                 "platform": platform,
                 "date": record_date,
                 "branch": text(row[1]),
@@ -185,7 +215,10 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
                 "timeout_72h": integer(row[10]),
                 "timeout_96h": integer(row[11]),
                 "timeout_120h": integer(row[12]),
-            })
+            }
+            if platform == "京东":
+                record.update(jd_delivery_metrics(record["timeout_36h"], record["timeout_rate_36h"], record["timeout_48h"]))
+            records.append(record)
         workbook.close()
     return records
 
@@ -551,11 +584,17 @@ def build_trends(timeout_rows: list[dict[str, Any]], mapping: dict[str, dict[str
     work: dict[str, dict[str, dict[str, Any]]] = {p: defaultdict(dict) for p in PLATFORMS}
     for row in timeout_rows:
         branch_box = work[row["platform"]][row["branch"]]
-        customer_box = branch_box.setdefault(row["customer"], {
+        if row["platform"] == "京东":
+            customer_key = ("code", row["customer_code"]) if row["customer_code"] else ("name", row["customer"])
+        else:
+            customer_key = row["customer"]
+        customer_box = branch_box.setdefault(customer_key, {
             "customer": row["customer"], "customer_code": row["customer_code"],
             "has_shipping_fallback": row["has_shipping_fallback"], "series": [], "total_36h": 0,
         })
         point = {k: row[k] for k in ("date", "timeout_24h", "timeout_36h", "timeout_rate_36h", "timeout_48h", "timeout_72h", "timeout_96h", "timeout_120h")}
+        if row["platform"] == "京东":
+            point.update({k: row.get(k) for k in ("shipment_volume", "shipment_interval", "timeout_rate_48h")})
         customer_box["series"].append(point)
         customer_box["total_36h"] += row["timeout_36h"]
     result = {p: {} for p in PLATFORMS}
@@ -641,7 +680,11 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     top10_by_date = {p: {} for p in PLATFORMS}
     for platform in PLATFORMS:
         for day in dates_by_platform[platform]:
-            daily = sorted((r for r in timeout_rows if r["platform"] == platform and r["date"] == day), key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:10]
+            rows_for_day = (r for r in timeout_rows if r["platform"] == platform and r["date"] == day)
+            if platform == "京东":
+                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_48h"], -number(r.get("timeout_rate_48h")), -r["timeout_36h"], r["branch"]))[:10]
+            else:
+                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:10]
             enriched = []
             for rank, row in enumerate(daily, 1):
                 branch, parent = row["branch"], parent_of(row["branch"], mapping)
