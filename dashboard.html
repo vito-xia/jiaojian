@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=16">
+  <link rel="stylesheet" href="assets/dashboard.css?v=17">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -179,6 +179,7 @@
             <div class="jd-threshold-copy"><strong>上榜阈值</strong><small id="jdThresholdWindow">最近 15 个自然日</small></div>
             <label><span>48H票数 ≥</span><input id="jdCountThreshold" type="number" min="0" step="1" inputmode="numeric" aria-label="京东48H上榜票数阈值"></label>
             <label><span>48H率 ≥</span><span class="jd-rate-input"><input id="jdRateThreshold" type="number" min="0" step="0.1" inputmode="decimal" aria-label="京东48H上榜率阈值"><i>%</i></span></label>
+            <label><span>统计天数</span><span class="jd-days-input"><input id="jdWindowDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-label="京东上榜统计自然日天数" value="15"><i>天</i></span></label>
             <button id="resetJdThresholds" type="button">恢复默认</button>
           </div>
           <div class="jd-page-size-control" id="jdPageSizeControl" hidden>
@@ -302,6 +303,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=17"></script>
-  <script src="assets/dashboard.js?v=19"></script>
+  <script src="assets/dashboard.js?v=20"></script>
 </body>
 </html>

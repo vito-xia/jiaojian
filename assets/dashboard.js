@@ -6,9 +6,9 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
   const JD_PAGE_SIZES = Object.freeze([10, 20, 30]);
-  const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1 });
+  const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
   let jdPeriodContext = null;
@@ -131,15 +131,18 @@
       const rate = Number(saved.rate);
       if (Number.isFinite(count) && count >= 0) state.jdThresholdCount = Math.round(count);
       if (Number.isFinite(rate) && rate >= 0) state.jdThresholdRate = Math.round(rate * 10000) / 10000;
+      const days = Number(saved.days);
+      if (Number.isFinite(days) && days >= 1) state.jdThresholdDays = Math.min(365, Math.round(days));
     } catch {
       state.jdThresholdCount = JD_THRESHOLD_DEFAULTS.count;
       state.jdThresholdRate = JD_THRESHOLD_DEFAULTS.rate;
+      state.jdThresholdDays = JD_THRESHOLD_DEFAULTS.days;
     }
   }
 
   function persistJdThresholds() {
     try {
-      window.localStorage.setItem(JD_THRESHOLD_STORAGE_KEY, JSON.stringify({ count: state.jdThresholdCount, rate: state.jdThresholdRate }));
+      window.localStorage.setItem(JD_THRESHOLD_STORAGE_KEY, JSON.stringify({ count: state.jdThresholdCount, rate: state.jdThresholdRate, days: state.jdThresholdDays }));
     } catch {
       // file:// 或受限浏览器禁用本地存储时，仍保留当前会话内的阈值。
     }
@@ -148,22 +151,26 @@
   function syncJdThresholdInputs() {
     const countInput = $('#jdCountThreshold');
     const rateInput = $('#jdRateThreshold');
+    const daysInput = $('#jdWindowDays');
     if (countInput) countInput.value = String(state.jdThresholdCount);
     if (rateInput) rateInput.value = String(state.jdThresholdRate);
+    if (daysInput) daysInput.value = String(state.jdThresholdDays);
   }
 
   function updateJdThresholdsFromInputs() {
     const count = $('#jdCountThreshold')?.valueAsNumber;
     const rate = $('#jdRateThreshold')?.valueAsNumber;
-    if (!Number.isFinite(count) || count < 0 || !Number.isFinite(rate) || rate < 0) return;
+    const days = $('#jdWindowDays')?.valueAsNumber;
+    if (!Number.isFinite(count) || count < 0 || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(days) || days < 1) return;
     state.jdThresholdCount = Math.round(count);
     state.jdThresholdRate = Math.round(rate * 10000) / 10000;
+    state.jdThresholdDays = Math.min(365, Math.max(1, Math.round(days)));
     persistJdThresholds();
     renderTop10();
   }
 
   function jdRankingWindowDates() {
-    return dayRange(state.date, 15);
+    return dayRange(state.date, state.jdThresholdDays);
   }
 
   function jdCustomerTrend(row) {
@@ -194,7 +201,7 @@
 
   function rankingCountChip(count) {
     const kind = count >= 4 ? ' frequent' : count > 0 ? ' active' : '';
-    return `<span class="ranking-count${kind}" title="最近15个自然日命中阈值的天数">${count}次</span>`;
+    return `<span class="ranking-count${kind}" title="最近${state.jdThresholdDays}个自然日命中阈值的天数">${count}次</span>`;
   }
 
   function renderJdThresholdControls(active) {
@@ -203,7 +210,7 @@
     controls.hidden = !active;
     if (!active) return;
     const range = jdRankingWindowDates();
-    setText('#jdThresholdWindow', `${range[0] || '—'} 至 ${range.at(-1) || '—'} · 15个自然日`);
+    setText('#jdThresholdWindow', `${range[0] || '—'} 至 ${range.at(-1) || '—'} · ${state.jdThresholdDays}个自然日`);
   }
 
 
@@ -372,17 +379,19 @@
     });
     const jdCountInput = $('#jdCountThreshold');
     const jdRateInput = $('#jdRateThreshold');
-    [jdCountInput, jdRateInput].forEach(input => {
+    const jdDaysInput = $('#jdWindowDays');
+    [jdCountInput, jdRateInput, jdDaysInput].forEach(input => {
       input.addEventListener('input', updateJdThresholdsFromInputs);
       input.addEventListener('change', syncJdThresholdInputs);
     });
     $('#resetJdThresholds').addEventListener('click', () => {
       state.jdThresholdCount = JD_THRESHOLD_DEFAULTS.count;
       state.jdThresholdRate = JD_THRESHOLD_DEFAULTS.rate;
+      state.jdThresholdDays = JD_THRESHOLD_DEFAULTS.days;
       syncJdThresholdInputs();
       persistJdThresholds();
       renderTop10();
-      showToast('京东上榜阈值已恢复为 20票 / 1%');
+      showToast('京东上榜阈值与统计天数已恢复为 20票 / 1% / 15天');
     });
 
     $('#previousDate').addEventListener('click', () => moveDate(-1));
@@ -616,7 +625,7 @@
     $('#top10Footnote').textContent = douyin
       ? '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
       : jd
-        ? '发货量 = 36H超时量 ÷ (36H超时率 / 100)，四舍五入取整；48H超时率 = 48H超时量 ÷ 发货量。上榜次数按所选数据日向前共 15 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。'
+        ? `发货量 = 36H超时量 ÷ (36H超时率 / 100)，四舍五入取整；48H超时率 = 48H超时量 ÷ 发货量。上榜次数按所选数据日向前共 ${state.jdThresholdDays} 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。`
         : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
   }
 
