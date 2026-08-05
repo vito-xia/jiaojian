@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=14">
+  <link rel="stylesheet" href="assets/dashboard.css?v=17">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -157,7 +157,7 @@
         <div class="branch-search-copy">
           <span>网点检索</span>
           <h3>搜索当前平台的近期风险网点</h3>
-          <p>输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。</p>
+          <p id="branchSearchDescription">输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。</p>
         </div>
         <div class="branch-search-control">
           <label class="branch-search-input" for="branchSearch">
@@ -176,10 +176,20 @@
             <p id="top10Caption">按 36H 交件超时量降序</p>
           </div>
           <div class="jd-threshold-controls" id="jdThresholdControls" hidden>
-            <div class="jd-threshold-copy"><strong>上榜阈值</strong><small id="jdThresholdWindow">最近 8 个自然日</small></div>
+            <div class="jd-threshold-copy"><strong>上榜阈值</strong><small id="jdThresholdWindow">最近 15 个自然日</small></div>
             <label><span>48H票数 ≥</span><input id="jdCountThreshold" type="number" min="0" step="1" inputmode="numeric" aria-label="京东48H上榜票数阈值"></label>
             <label><span>48H率 ≥</span><span class="jd-rate-input"><input id="jdRateThreshold" type="number" min="0" step="0.1" inputmode="decimal" aria-label="京东48H上榜率阈值"><i>%</i></span></label>
+            <label><span>统计天数</span><span class="jd-days-input"><input id="jdWindowDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-label="京东上榜统计自然日天数" value="15"><i>天</i></span></label>
             <button id="resetJdThresholds" type="button">恢复默认</button>
+          </div>
+          <div class="jd-page-size-control" id="jdPageSizeControl" hidden>
+            <span>每页展示</span>
+            <select id="jdPageSize" aria-label="京东每页展示客户数">
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+            </select>
+            <span>条</span>
           </div>
           <div class="legend-row" id="topLegend">
             <span><i class="legend-dot red"></i>10分触发清退</span>
@@ -192,6 +202,7 @@
             <tbody id="top10Body"></tbody>
           </table>
         </div>
+        <div class="pagination" id="top10Pagination" aria-label="京东客户分页" hidden></div>
         <div class="card-footnote" id="top10Footnote"></div>
       </article>
      </section>
@@ -249,7 +260,7 @@
         </article>
       </div>
     </section>
-    <section class="methodology" aria-label="口径说明">
+    <section class="methodology" id="methodologySection" aria-label="口径说明">
       <div class="method-copy">
         <span class="method-icon">i</span>
         <div><h3>口径说明</h3><p>停滞积分 = T-16 至 T-1 内“物流停滞-揽收端”与“物流停滞-全链路”的当前违规积分之和；6 分进入高风险观察，10 分触发积分清退规则。</p></div>
@@ -285,12 +296,13 @@
       <div class="drawer-score-trend" id="drawerScoreTrend" hidden></div>
       <div class="drawer-history" id="drawerHistory"></div>
       <div class="drawer-charts" id="drawerCharts"></div>
+      <section class="jd-customer-period" id="jdCustomerPeriod" hidden aria-label="京东客户周期汇总"></section>
     </aside>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=16"></script>
-  <script src="assets/dashboard.js?v=17"></script>
+  <script src="data/dashboard_bundle.js?v=17"></script>
+  <script src="assets/dashboard.js?v=20"></script>
 </body>
 </html>
