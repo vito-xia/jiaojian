@@ -140,6 +140,10 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .jd-rate-input i { position: absolute; right: 7px; color: var(--quiet); font-size: 9px; font-style: normal; pointer-events: none; }
 .jd-threshold-controls button { height: 31px; padding: 0 9px; border: 0; border-radius: 8px; color: var(--blue); background: #e7f2ff; cursor: pointer; font-size: 9px; font-weight: 650; white-space: nowrap; }
 .jd-threshold-controls button:hover { background: #dcecff; }
+.jd-page-size-control { display: inline-flex; align-items: center; gap: 6px; padding: 9px 10px; border: 1px solid rgba(0,113,227,.12); border-radius: 14px; color: var(--muted); background: #f5faff; font-size: 9px; white-space: nowrap; }
+.jd-page-size-control[hidden] { display: none; }
+.jd-page-size-control select { height: 31px; padding: 0 23px 0 8px; border: 1px solid var(--line); border-radius: 8px; outline: 0; color: var(--ink); background: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+.jd-page-size-control select:focus { border-color: rgba(0,113,227,.5); box-shadow: 0 0 0 3px rgba(0,113,227,.1); }
 .legend-row { display: flex; align-items: center; gap: 15px; color: var(--muted); font-size: 10px; }
 .legend-row span { display: inline-flex; align-items: center; gap: 6px; }
 .legend-dot { width: 6px; height: 6px; border-radius: 50%; }.legend-dot.red { background: var(--red); }.legend-dot.amber { background: var(--amber); }

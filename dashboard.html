@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=14">
+  <link rel="stylesheet" href="assets/dashboard.css?v=15">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -181,6 +181,15 @@
             <label><span>48H率 ≥</span><span class="jd-rate-input"><input id="jdRateThreshold" type="number" min="0" step="0.1" inputmode="decimal" aria-label="京东48H上榜率阈值"><i>%</i></span></label>
             <button id="resetJdThresholds" type="button">恢复默认</button>
           </div>
+          <div class="jd-page-size-control" id="jdPageSizeControl" hidden>
+            <span>每页展示</span>
+            <select id="jdPageSize" aria-label="京东每页展示客户数">
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+            </select>
+            <span>条</span>
+          </div>
           <div class="legend-row" id="topLegend">
             <span><i class="legend-dot red"></i>10分触发清退</span>
             <span><i class="legend-dot amber"></i>6分高风险</span>
@@ -192,6 +201,7 @@
             <tbody id="top10Body"></tbody>
           </table>
         </div>
+        <div class="pagination" id="top10Pagination" aria-label="京东客户分页" hidden></div>
         <div class="card-footnote" id="top10Footnote"></div>
       </article>
      </section>
@@ -290,7 +300,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=16"></script>
-  <script src="assets/dashboard.js?v=17"></script>
+  <script src="data/dashboard_bundle.js?v=17"></script>
+  <script src="assets/dashboard.js?v=18"></script>
 </body>
 </html>

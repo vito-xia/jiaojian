@@ -5,9 +5,10 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
+  const JD_PAGE_SIZES = Object.freeze([10, 20, 30]);
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate };
   let chartJobs = [];
   let toastTimer = null;
 
@@ -30,6 +31,12 @@
   }
   function datesForPlatform() { return data.platforms?.[state.platform]?.dates || []; }
   function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
+  function topRows() {
+    const platform = data.platforms?.[state.platform] || {};
+    return state.platform === "\u4eac\u4e1c"
+      ? platform.top60_by_date?.[state.date] || top10Rows()
+      : top10Rows();
+  }
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
   function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
@@ -199,6 +206,18 @@
   }
 
 
+  function renderJdPageSizeControl(active) {
+    const control = $("#jdPageSizeControl");
+    const pagination = $("#top10Pagination");
+    if (!control) return;
+    control.hidden = !active;
+    if (pagination) pagination.hidden = !active;
+    if (active) {
+      const input = $("#jdPageSize");
+      if (input) input.value = String(state.jdPageSize);
+    }
+  }
+
   function initialize() {
     if (!data?.meta || !data?.platforms) {
       setText('#freshness', '数据加载失败');
@@ -232,6 +251,7 @@
       state.scorePage = 1;
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
+      state.topPage = 1;
       renderDateSelector();
       renderAll();
       showToast(`已切换至${state.platform}平台`);
@@ -243,6 +263,7 @@
       state.scorePage = 1;
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
+      state.topPage = 1;
       updateDateButtons();
       renderAll();
     });
@@ -292,6 +313,7 @@
         event.target.value = '';
         state.deliveryControlPage = 1;
         state.deliveryHighScorePage = 1;
+
         renderDeliverySearch();
         renderDeliveryControls();
         renderDeliveryHighScores();
@@ -331,6 +353,14 @@
       renderBranchSearch();
       $('#branchSearch').focus();
     });
+    $("#jdPageSize")?.addEventListener("change", event => {
+      const value = Number(event.target.value);
+      if (!JD_PAGE_SIZES.includes(value)) return;
+      state.jdPageSize = value;
+      state.topPage = 1;
+      renderTop10();
+    });
+    $("#top10Pagination")?.addEventListener("click", event => changePage(event, "top10"));
     const jdCountInput = $('#jdCountThreshold');
     const jdRateInput = $('#jdRateThreshold');
     [jdCountInput, jdRateInput].forEach(input => {
@@ -398,6 +428,7 @@
     $('#dateSelect').value = next;
     state.controlPage = 1;
     state.scorePage = 1;
+    state.topPage = 1;
     updateDateButtons();
     renderAll();
   }
@@ -524,10 +555,12 @@
       </button>`).join('')}</div>`;
   }
   function renderTop10() {
-    const rows = top10Rows();
+    const rows = topRows();
     const douyin = state.platform === '抖音';
     const jd = state.platform === '京东';
+    const pageSize = jd ? state.jdPageSize : rows.length || PAGE_SIZE;
     renderJdThresholdControls(jd);
+    renderJdPageSizeControl(jd);
     const table = $('#top10Table');
     table.style.minWidth = douyin ? '1500px' : jd ? '1200px' : '1120px';
     table.classList.toggle('douyin-columns', douyin);
@@ -538,11 +571,14 @@
         ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>36H超时量</th><th>36H超时率</th><th>48H超时量</th><th>48H超时率</th><th>上榜次数</th><th>发运兜底</th></tr>'
         : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
+    const pages = jd ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
+    state.topPage = Math.min(state.topPage, pages);
+    const pageRows = jd ? rows.slice((state.topPage - 1) * pageSize, state.topPage * pageSize) : rows;
     if (!rows.length) {
       const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
       $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 11 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
     } else {
-      $('#top10Body').innerHTML = rows.map(row => {
+      $('#top10Body').innerHTML = pageRows.map(row => {
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
         const identity = `<td>${rankBadge(row.rank)}</td><td>${branchButton(row.branch, row.parent_name)}</td><td>${customer}</td>`;
         if (jd) {
@@ -554,6 +590,12 @@
         }
         return `<tr>${common}<td>${scoreChip(row.stagnant_score)}</td><td>${actionPill(row.current_control)}</td><td>${formatNumber(row.merchant_control_count)}</td><td>${formatNumber(row.clearout_count)}次<span class="subline">本分部 ${formatNumber(row.branch_clearout_count)}次</span></td><td>${shortDate(row.last_clearout_date)}</td><td>${escapeHtml(row.last_clearout_type || '—')}</td><td>${historyStack(row.history_shortage)}</td></tr>`;
       }).join('');
+    }
+
+    const pagination = $("#top10Pagination");
+    if (pagination) {
+      pagination.hidden = !jd;
+      if (jd) renderPagination(pagination, state.topPage, pages, rows.length, "top10");
     }
 
     setText('#warningStatus', douyin ? '聚焦最高风险客户' : jd ? '聚焦 48H 最高风险' : '内部交件预警');
@@ -719,6 +761,7 @@
     else if (kind === 'score') { state.scorePage = page; renderScores(); }
     else if (kind === 'delivery-control') { state.deliveryControlPage = page; renderDeliveryControls(); }
     else if (kind === 'delivery-high-score') { state.deliveryHighScorePage = page; renderDeliveryHighScores(); }
+    else if (kind === 'top10') { state.topPage = page; renderTop10(); }
   }
 
   function dayRange(endDay, count = 7) {

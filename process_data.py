@@ -678,11 +678,12 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     rolling_score = build_score_calculator(daily_scores)
     delivery_monitor = build_delivery_monitor(delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, mapping)
     top10_by_date = {p: {} for p in PLATFORMS}
+    top60_by_date = {"京东": {}}
     for platform in PLATFORMS:
         for day in dates_by_platform[platform]:
             rows_for_day = (r for r in timeout_rows if r["platform"] == platform and r["date"] == day)
             if platform == "京东":
-                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_48h"], -number(r.get("timeout_rate_48h")), -r["timeout_36h"], r["branch"]))[:10]
+                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_48h"], -number(r.get("timeout_rate_48h")), -r["timeout_36h"], r["branch"]))[:60]
             else:
                 daily = sorted(rows_for_day, key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:10]
             enriched = []
@@ -703,7 +704,11 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                     "last_clearout_type": clear["last_type"] if platform == "抖音" else "",
                     "history_shortage": history_shortage or {"months": [], "branches": [], "customer_count": 0},
                 })
-            top10_by_date[platform][day] = enriched
+            if platform == "京东":
+                top60_by_date[platform][day] = enriched
+                top10_by_date[platform][day] = enriched[:10]
+            else:
+                top10_by_date[platform][day] = enriched
     branch_events = [r for r in controls if r["is_branch_level"] and r["control_action"] in CONTROL_ACTIONS and r["start_date"]]
     control_by_date, high_scores_by_date = {}, {}
     # 保留交件日期索引，同时补充最新管控快照日期，供前端在选择 7 月 30 日时展示 7 月 31 日管控。
@@ -740,6 +745,8 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     current_branch_executing = len({b for b in current_controls})
     current_merchant_executing = sum(merchant_counts.values())
     example_parent = "广东佛山南海新河村公司"
+    platform_payloads = {p: {"dates": dates_by_platform[p], "top10_by_date": top10_by_date[p]} for p in PLATFORMS}
+    platform_payloads["京东"]["top60_by_date"] = top60_by_date["京东"]
     return {
         "meta": {
             "as_of": as_of, "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -759,7 +766,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             "summary": {"executing_branch_controls": current_branch_executing, "executing_merchant_controls": current_merchant_executing, "historical_clearouts": len(clearouts)},
             "example_check": shortage.get("抖音", {}).get(example_parent, {"months": [], "branches": []}),
         },
-        "platforms": {p: {"dates": dates_by_platform[p], "top10_by_date": top10_by_date[p]} for p in PLATFORMS},
+        "platforms": platform_payloads,
         "controls_by_date": control_by_date, "high_scores_by_date": high_scores_by_date,
         "history_lookup": shortage,
         "history_all_lookup": shortage_all,
