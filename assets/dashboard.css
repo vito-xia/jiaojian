@@ -334,6 +334,25 @@ footer { padding: 0 6px; display: flex; justify-content: space-between; color: v
 .history-detail-grid p { margin: 5px 0 0; color: rgba(255,255,255,.82); font-size: 9px; line-height: 1.55; }
 .history-detail-empty { margin-top: 14px; padding: 34px 16px; border: 1px dashed rgba(255,255,255,.14); border-radius: 12px; color: rgba(255,255,255,.5); text-align: center; font-size: 10px; }
 
+.jd-customer-period { margin: 0 32px 28px; padding: 18px; border: 1px solid rgba(0,113,227,.14); border-radius: 18px; background: linear-gradient(145deg, #fff, #f5faff); box-shadow: 0 5px 16px rgba(0,0,0,.035); }
+.jd-period-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.jd-period-head > div:first-child { min-width: 0; }
+.jd-period-head > div:first-child > span { color: var(--blue); font-size: 8px; font-weight: 740; letter-spacing: .11em; }
+.jd-period-head h3 { margin: 5px 0 0; font-size: 15px; }
+.jd-period-head p { margin: 5px 0 0; color: var(--quiet); font-size: 9px; }
+.jd-period-filters { flex: 0 0 min(460px, 54%); display: grid; grid-template-columns: minmax(130px, 1.4fr) minmax(110px, 1fr) auto minmax(110px, 1fr); align-items: end; gap: 7px; }
+.jd-period-filters label { min-width: 0; display: grid; gap: 5px; }
+.jd-period-filters label > span { color: var(--quiet); font-size: 8px; }
+.jd-period-filters select { width: 100%; min-width: 0; height: 31px; padding: 0 22px 0 8px; border: 1px solid var(--line); border-radius: 8px; outline: 0; color: var(--ink); background: #fff; font: inherit; font-size: 9px; }
+.jd-period-filters select:focus { border-color: rgba(0,113,227,.5); box-shadow: 0 0 0 3px rgba(0,113,227,.1); }
+.jd-period-filters > i { align-self: end; padding-bottom: 8px; color: var(--quiet); font-size: 9px; font-style: normal; }
+.jd-period-meta { margin-top: 15px; padding: 10px 12px; display: flex; align-items: baseline; gap: 9px; border-radius: 10px; background: rgba(0,113,227,.055); }
+.jd-period-meta strong { color: var(--ink); font-size: 11px; }
+.jd-period-meta span { color: var(--quiet); font-size: 9px; }
+.jd-period-metrics { margin-top: 10px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.jd-period-metrics > div { min-width: 0; padding: 12px; border: 1px solid rgba(0,0,0,.055); border-radius: 12px; background: rgba(255,255,255,.82); }
+.jd-period-metrics span, .jd-period-metrics small { display: block; overflow: hidden; color: var(--quiet); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.jd-period-metrics strong { display: block; margin: 6px 0 4px; overflow: hidden; color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-charts { padding: 20px 32px; }
 .charts-heading { margin: 5px 0 14px; display: flex; align-items: flex-end; justify-content: space-between; }.charts-heading h3 { margin: 0; font-size: 17px; }.charts-heading span { color: var(--quiet); font-size: 9px; }
 .chart-card { margin-bottom: 13px; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: 0 5px 16px rgba(0,0,0,.035); }
@@ -446,4 +465,15 @@ footer { padding: 0 6px; display: flex; justify-content: space-between; color: v
 @media (max-width: 760px) {
   .jd-threshold-controls { width: 100%; flex-wrap: wrap; }
   .jd-threshold-copy { flex: 1 0 100%; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid rgba(0,113,227,.1); }
+}
+@media (max-width: 760px) {
+  .jd-customer-period { margin: 14px 20px 24px; padding: 16px; }
+  .jd-period-head { flex-direction: column; }
+  .jd-period-filters { width: 100%; flex-basis: auto; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .jd-period-filters > i { display: none; }
+  .jd-period-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 440px) {
+  .jd-period-meta { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .jd-period-metrics { grid-template-columns: 1fr; }
 }
