@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=17">
+  <link rel="stylesheet" href="assets/dashboard.css?v=19">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -21,6 +21,7 @@
       <div class="nav-links" aria-label="页面模块">
         <a id="platformControlNav" href="#platform-control">平台预警与管控</a>
         <a href="#delivery-warning">交件预警</a>
+        <a id="jdControlStatsNav" href="#jd-control-statistics" hidden>管控统计</a>
         <a id="deliveryScoreNav" href="#delivery-score-monitor" hidden>派送积分监控</a>
       </div>
       <div class="freshness" id="freshness"><span class="live-dot"></span>数据载入中</div>
@@ -191,10 +192,6 @@
             </select>
             <span>条</span>
           </div>
-          <div class="legend-row" id="topLegend">
-            <span><i class="legend-dot red"></i>10分触发清退</span>
-            <span><i class="legend-dot amber"></i>6分高风险</span>
-          </div>
         </div>
         <div class="table-scroll">
           <table class="data-table top10-table" id="top10Table">
@@ -207,6 +204,34 @@
       </article>
      </section>
 
+    <section class="content-section jd-control-statistics" id="jd-control-statistics" hidden>
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker"><span class="kicker-index blue">03</span>管控统计</div>
+          <h2>管控统计</h2>
+          <p>从 2026-08-02 数据日开始展示管控记录，T 日计算 T-2 日数据；上榜次数按当前上榜阈值向前回算，且 7 天内累计上榜达到筛选值（默认 4 次）即发起管控，管控周期为数据日次日至第 7 日。管控统计独立于顶部日期筛选。</p>
+        </div>
+        <div class="section-status"><span class="status-dot active"></span><span id="jdControlStatus">管控规则待计算</span></div>
+      </div>
+      <div class="jd-control-rule"><span>上榜阈值</span><strong id="jdControlRuleText">按当前上榜阈值 · 7 天累计上榜 ≥ 4 次</strong><small>管控开始日 2026-08-02 · 上榜次数向前回算 · 不受顶部日期筛选影响 · 最多展示 100 条历史记录</small></div>
+      <article class="data-card data-card-wide">
+        <div class="card-toolbar">
+          <div>
+            <h3>京东 · 管控记录</h3>
+            <p>按数据日倒序，每页 10 条，最多 10 页</p>
+          </div>
+          <label class="jd-control-hit-filter" for="jdControlHitCount"><span>上榜次数 ≥</span><input id="jdControlHitCount" type="number" min="1" max="7" step="1" value="4" inputmode="numeric" aria-label="管控统计上榜次数筛选"><small>天</small></label>
+          <span class="record-count" id="jdControlCount">0 条</span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table compact-table jd-control-table">
+            <thead><tr><th>数据日（T-2）</th><th>网点 / 一级公司</th><th>客户名称</th><th>48H超时量</th><th>48H超时率</th><th>7天上榜</th><th>管控开始</th><th>管控结束</th></tr></thead>
+            <tbody id="jdControlBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="jdControlPagination" aria-label="京东管控统计分页"></div>
+      </article>
+    </section>
     <section class="content-section" id="delivery-score-monitor" hidden>
       <div class="section-heading">
         <div>
@@ -303,6 +328,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=17"></script>
-  <script src="assets/dashboard.js?v=20"></script>
+  <script src="assets/dashboard.js?v=22"></script>
 </body>
 </html>
