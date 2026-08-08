@@ -1,7 +1,53 @@
 (() => {
   'use strict';
 
-  const data = window.__JIAOJIAN_DASHBOARD__;
+  const data = window.__JIAOJIAN_DASHBOARD__ || {};
+  const dataLoader = window.__JIAOJIAN_DATA_LOADER__;
+  const PLATFORM_CHUNKS = Object.freeze({
+    '\u6296\u97f3': 'platform-douyin',
+    '\u6dd8\u5b9d': 'platform-taobao',
+    '\u4eac\u4e1c': 'platform-jd',
+    '\u5feb\u624b': 'platform-kuaishou'
+  });
+  const DRAWER_CHUNKS = Object.freeze({
+    '\u6296\u97f3': 'drawer-douyin',
+    '\u6dd8\u5b9d': 'drawer-taobao',
+    '\u4eac\u4e1c': 'drawer-jd',
+    '\u5feb\u624b': 'drawer-kuaishou'
+  });
+
+  function hasDataKey(value, key) {
+    return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
+  }
+
+  function platformDataReady(platform) {
+    return hasDataKey(data.platforms, platform);
+  }
+
+  function drawerDataReady(platform) {
+    return hasDataKey(data.trends, platform);
+  }
+
+  function loadDataChunk(name) {
+    if (!dataLoader) return Promise.resolve(data);
+    return dataLoader.load(name);
+  }
+
+  function ensurePlatformData(platform) {
+    return platformDataReady(platform) ? Promise.resolve(data) : loadDataChunk(PLATFORM_CHUNKS[platform]);
+  }
+
+  function ensureDrawerData(platform) {
+    return drawerDataReady(platform) ? Promise.resolve(data) : loadDataChunk(DRAWER_CHUNKS[platform]);
+  }
+
+  function ensureControlsData() {
+    return data.controls_by_date ? Promise.resolve(data) : loadDataChunk('controls');
+  }
+
+  function ensureDeliveryData() {
+    return data.delivery_monitor ? Promise.resolve(data) : loadDataChunk('delivery');
+  }
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
@@ -40,7 +86,7 @@
     const [year, month] = String(value).split('-');
     return year && month ? `${year}年${Number(month)}月` : value;
   }
-  function datesForPlatform() { return data.platforms?.[state.platform]?.dates || []; }
+  function datesForPlatform() { return data.platforms?.[state.platform]?.dates || data.platform_dates?.[state.platform] || []; }
   function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
   function topRows() {
     const platform = data.platforms?.[state.platform] || {};
@@ -251,23 +297,49 @@
     }
   }
 
-  function initialize() {
-    if (!data?.meta || !data?.platforms) {
+  async function initialize() {
+    if (!data?.meta) {
       setText('#freshness', '数据加载失败');
-      $('#top10Body').innerHTML = '<tr class="empty-row"><td>看板数据不存在，请先运行 process_data.py。</td></tr>';
+      $('#top10Body').innerHTML = '<tr class="empty-row"><td>看板引导数据不存在，请先运行更新看板数据.bat。</td></tr>';
+      return;
+    }
+    restoreJdThresholds();
+    syncJdThresholdInputs();
+    bindEvents();
+    setText('#freshness', '正在加载抖音数据');
+    try {
+      await ensurePlatformData(state.platform);
+    } catch (error) {
+      console.error(error);
+      setText('#freshness', '数据加载失败');
+      showToast('抖音数据加载失败，请刷新页面重试');
       return;
     }
     const dates = datesForPlatform();
     state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
-    restoreJdThresholds();
-    syncJdThresholdInputs();
-    bindEvents();
     renderDateSelector();
     renderAll();
+    scheduleBackgroundLoads();
   }
 
+  function scheduleBackgroundLoads() {
+    const run = () => {
+      Promise.allSettled([ensurePlatformData('\u4eac\u4e1c'), ensureControlsData()])
+        .then(() => renderAll());
+      window.setTimeout(() => {
+        ensureDeliveryData()
+          .then(() => { if (state.platform === '\u6296\u97f3') renderAll(); })
+          .catch(error => console.warn(error));
+      }, 1800);
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 1400 });
+    } else {
+      window.setTimeout(run, 700);
+    }
+  }
   function bindEvents() {
-    $('#platformSwitcher').addEventListener('click', event => {
+    $('#platformSwitcher').addEventListener('click', async event => {
       const button = event.target.closest('[data-platform]');
       if (!button || button.dataset.platform === state.platform) return;
       state.platform = button.dataset.platform;
@@ -278,8 +350,7 @@
         item.classList.toggle('active', active);
         item.setAttribute('aria-selected', String(active));
       });
-      const dates = datesForPlatform();
-      state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
+      state.date = '';
       state.controlPage = 1;
       state.scorePage = 1;
       state.deliveryControlPage = 1;
@@ -287,10 +358,20 @@
       state.topPage = 1;
       state.jdControlPage = 1;
       renderDateSelector();
+      setText('#freshness', '正在加载' + state.platform + '数据');
+      try {
+        await ensurePlatformData(state.platform);
+      } catch (error) {
+        console.error(error);
+        showToast(state.platform + '数据加载失败，请重试');
+        return;
+      }
+      const dates = datesForPlatform();
+      state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
+      renderDateSelector();
       renderAll();
-      showToast(`已切换至${state.platform}平台`);
+      showToast('已切换至' + state.platform + '平台');
     });
-
     $('#dateSelect').addEventListener('change', event => {
       state.date = event.target.value;
       state.controlPage = 1;
@@ -364,9 +445,18 @@
       renderDeliveryHighScores();
       $('#deliverySearch').focus();
     });
-    $('#branchSearch').addEventListener('input', event => {
+    $('#branchSearch').addEventListener('input', async event => {
       state.branchQuery = event.target.value;
       renderBranchSearch();
+      if (!state.branchQuery.trim() || drawerDataReady(state.platform)) return;
+      setText('#branchSearchHint', '正在加载' + state.platform + '网点趋势');
+      try {
+        await ensureDrawerData(state.platform);
+        renderBranchSearch();
+      } catch (error) {
+        console.error(error);
+        setText('#branchSearchHint', '网点趋势加载失败，请重试');
+      }
     });
     $('#branchSearch').addEventListener('keydown', event => {
       if (event.key === 'Enter') {
@@ -589,9 +679,16 @@
     const clear = $('#clearBranchSearch');
     const results = $('#branchSearchResults');
     const query = String(state.branchQuery || '').trim();
+    const branchReady = drawerDataReady(state.platform);
     const branchCount = Object.keys(data.trends?.[state.platform] || {}).length;
     if (input.value !== state.branchQuery) input.value = state.branchQuery;
     clear.hidden = !state.branchQuery;
+    if (!branchReady) {
+      results.hidden = true;
+      results.innerHTML = '';
+      setText('#branchSearchHint', query ? '正在加载' + state.platform + '网点趋势' : '输入关键词后加载当前平台趋势');
+      return;
+    }
     if (!query) {
       results.hidden = true;
       results.innerHTML = '';
@@ -717,6 +814,16 @@
     if (section) section.hidden = !active;
     if (nav) nav.hidden = !active;
     if (!active || !section) return;
+    if (!drawerDataReady('\u4eac\u4e1c')) {
+      setText('#jdControlStatus', '正在加载京东历史统计');
+      ensureDrawerData('\u4eac\u4e1c').then(() => {
+        if (state.platform === '\u4eac\u4e1c') renderJdControlStatistics();
+      }).catch(error => {
+        console.error(error);
+        setText('#jdControlStatus', '京东历史统计加载失败，请重试');
+      });
+      return;
+    }
     const hitInput = $('#jdControlHitCount');
     if (hitInput) hitInput.value = String(state.jdControlMinHits);
     const rows = jdControlRows();
@@ -744,6 +851,11 @@
     $('#platform-control').hidden = !douyin;
     $('#platformControlNav').hidden = !douyin;
     if (!douyin) return;
+    if (!data.controls_by_date) {
+      setText('#controlStatus', '平台管控数据加载中');
+      setText('#platformSearchHint', '平台管控数据加载中');
+      return;
+    }
     setText('#controlStatus', `抖音平台数据已接入 · 更新至 ${shortDate(currentControlDate())}`);
     renderPlatformSearch();
     renderControls();
@@ -935,6 +1047,11 @@
   function renderBranchScoreTrend(branch, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
+    if (state.platform !== '\u6296\u97f3') {
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
     panel.classList.remove('jd-analysis-panel');
     const scenes = ['物流停滞-揽收端', '物流停滞-全链路'];
     const branchScenes = data.branch_score_trends?.[branch] || {};
@@ -1106,6 +1223,11 @@
   function renderDeliveryScoreTrend(branch, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
+    if (state.platform !== '\u6296\u97f3') {
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
     panel.classList.remove('jd-analysis-panel');
     const source = deliveryMonitor().trends?.[branch]?.series || [];
     const byDate = new Map(source.map(point => [point.date, point]));
@@ -1158,10 +1280,47 @@
     document.body.style.overflow = 'hidden';
     setTimeout(() => $('#closeDrawer').focus(), 60);
   }
-  function openDrawer(branch, mode = "pickup") {
+  function showDrawerLoading(branch, message) {
+    setText('#drawerKicker', state.platform + ' · 加载中');
+    setText('#drawerTitle', branch);
+    setText('#drawerParent', '一级公司 · ' + branch);
+    $('#drawerSummary').innerHTML = '<div class="drawer-empty">' + escapeHtml(message || '正在加载趋势数据') + '</div>';
+    $('#drawerHistory').hidden = true;
+    $('#drawerHistory').innerHTML = '';
+    $('#drawerCharts').hidden = false;
+    $('#drawerCharts').innerHTML = '<div class="drawer-empty">' + escapeHtml(message || '正在加载趋势数据') + '</div>';
+    clearJdCustomerPeriodAnalysis();
+    chartJobs = [];
+    const layer = $('#drawerLayer');
+    layer.classList.add('open');
+    layer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  async function openDrawer(branch, mode = "pickup") {
     if (mode === 'delivery') {
+      if (!data.delivery_monitor) {
+        showDrawerLoading(branch, '正在加载派送监控数据');
+        try {
+          await ensureDeliveryData();
+        } catch (error) {
+          console.error(error);
+          showToast('派送监控数据加载失败，请重试');
+          return;
+        }
+      }
       openDeliveryDrawer(branch);
       return;
+    }
+    if (!drawerDataReady(state.platform)) {
+      showDrawerLoading(branch, '正在加载' + state.platform + '网点趋势');
+      try {
+        await ensureDrawerData(state.platform);
+      } catch (error) {
+        console.error(error);
+        showToast(state.platform + '网点趋势加载失败，请重试');
+        return;
+      }
     }
     const jd = state.platform === '京东';
     const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
@@ -1225,7 +1384,14 @@
     $('#drawerCharts').hidden = false;
     chartJobs = [];
     if (jd) renderJdBranchAnalysis(branch, customers, range);
-    else renderBranchScoreTrend(branch, range);
+    else if (state.platform === '\u6296\u97f3') renderBranchScoreTrend(branch, range);
+    else {
+      const scorePanel = $('#drawerScoreTrend');
+      if (scorePanel) {
+        scorePanel.hidden = true;
+        scorePanel.innerHTML = '';
+      }
+    }
     if (!customers.length) {
       $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
     } else {

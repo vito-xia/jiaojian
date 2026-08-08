@@ -179,6 +179,24 @@ def write_json(path: Path, payload: Any, pretty: bool = False) -> None:
     tmp.replace(path)
 
 
+def write_js_payload(path: Path, payload: Any, *, chunk_name: str | None = None) -> None:
+    """Write a browser-loadable payload without requiring fetch/file:// permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    if chunk_name is None:
+        content = (
+            "window.__JIAOJIAN_DASHBOARD__=" + encoded + ";\n"
+            "window.__JIAOJIAN_CHUNKS__=Object.create(null);\n"
+            "window.__JIAOJIAN_REGISTER_CHUNK__=window.__JIAOJIAN_REGISTER_CHUNK__||function(name,payload){"
+            "window.__JIAOJIAN_CHUNKS__[name]=payload;};\n"
+        )
+    else:
+        content = f"window.__JIAOJIAN_REGISTER_CHUNK__({json.dumps(chunk_name, ensure_ascii=False)},{encoded});\n"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, encoding="utf-8", newline="\n")
+    tmp.replace(path)
+
+
 def locate(data_dir: Path, prefix: str) -> Path:
     matches = sorted(data_dir.glob(f"{prefix}*.xlsx"))
     if len(matches) != 1:
@@ -806,10 +824,46 @@ def main() -> None:
     write_json(output / "platform_control.json", controls)
     write_json(output / "delivery_control.json", delivery_controls)
     write_json(output / "delivery_score.json", delivery_score_rows)
+    dashboard["meta"]["asset_version"] = re.sub(r"[^0-9]", "", dashboard["meta"]["generated_at"])
     write_json(output / "dashboard_data.json", dashboard)
     write_json(output / "data_quality_report.json", dashboard["meta"])
-    bundle = "window.__JIAOJIAN_DASHBOARD__=" + json.dumps(dashboard, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/") + ";\n"
-    (output / "dashboard_bundle.js").write_text(bundle, encoding="utf-8", newline="\n")
+    platform_files = {
+        PLATFORMS[0]: ("platform-douyin", "dashboard_platform_douyin.js"),
+        PLATFORMS[1]: ("platform-taobao", "dashboard_platform_taobao.js"),
+        PLATFORMS[2]: ("platform-jd", "dashboard_platform_jd.js"),
+        PLATFORMS[3]: ("platform-kuaishou", "dashboard_platform_kuaishou.js"),
+    }
+    drawer_files = {
+        PLATFORMS[0]: ("drawer-douyin", "dashboard_drawer_douyin.js"),
+        PLATFORMS[1]: ("drawer-taobao", "dashboard_drawer_taobao.js"),
+        PLATFORMS[2]: ("drawer-jd", "dashboard_drawer_jd.js"),
+        PLATFORMS[3]: ("drawer-kuaishou", "dashboard_drawer_kuaishou.js"),
+    }
+    generated_chunks = {
+        "controls": ("dashboard_controls.js", {
+            "controls_by_date": dashboard["controls_by_date"],
+            "high_scores_by_date": dashboard["high_scores_by_date"],
+        }),
+        "delivery": ("dashboard_delivery.js", {"delivery_monitor": dashboard["delivery_monitor"]}),
+    }
+    for platform, (chunk_name, filename) in platform_files.items():
+        generated_chunks[chunk_name] = (filename, {"platforms": {platform: dashboard["platforms"][platform]}})
+    for platform, (chunk_name, filename) in drawer_files.items():
+        payload = {"trends": {platform: dashboard["trends"].get(platform, {})}}
+        if platform in (PLATFORMS[0], PLATFORMS[1]):
+            payload["branch_top5_data"] = {platform: dashboard["branch_top5_data"].get(platform, {})}
+        if platform == PLATFORMS[0]:
+            payload["branch_score_trends"] = dashboard["branch_score_trends"]
+        generated_chunks[chunk_name] = (filename, payload)
+    bootstrap = {
+        "meta": dashboard["meta"],
+        "platform_dates": {platform: dashboard["platforms"][platform]["dates"] for platform in PLATFORMS},
+    }
+    write_js_payload(output / "dashboard_bundle.js", bootstrap)
+    for filename in {filename for filename, _ in generated_chunks.values()}:
+        (output / filename).unlink(missing_ok=True)
+    for chunk_name, (filename, payload) in generated_chunks.items():
+        write_js_payload(output / filename, payload, chunk_name=chunk_name)
     print(f"完成：T-1={as_of}，交件 {len(timeout_rows)} 条，TOP5 {len(top5)} 条，交件积分 {len(score_rows)} 条，交件管控 {len(controls)} 条，派送积分 {len(delivery_score_rows)} 条，派送管控 {len(delivery_controls)} 条")
     print(f"输出：{output.resolve()}")
     check = dashboard["meta"]["example_check"]
