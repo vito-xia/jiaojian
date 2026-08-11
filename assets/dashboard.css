@@ -238,7 +238,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .score-track .fill.clear { background: var(--red); }
 .score-table { min-width: 1180px; }
 .score-table .score-track { width: 132px; }
-.latest-deduction { display: block; color: var(--ink); font-size: 10px; font-weight: 720; white-space: nowrap; }
+
 .new-score-badge { padding: 3px 5px; border-radius: 6px; color: #fff; background: var(--blue); box-shadow: 0 3px 8px rgba(0,113,227,.2); font-size: 7px; font-weight: 760; letter-spacing: .04em; line-height: 1; }
 .deduction-level { min-width: 64px; padding: 5px 7px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: #665100; background: #fff3c4; font-size: 9px; font-weight: 720; white-space: nowrap; }
 .deduction-level.level-2, .deduction-level.level-3 { color: #9b5000; background: #ffe7bf; }

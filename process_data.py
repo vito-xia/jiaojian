@@ -873,17 +873,29 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             latest_dates = [date for date in score_rows_by_branch_date.get(branch, {}) if date <= day]
             latest_score_date = max(latest_dates, default="")
             latest_rows = score_rows_by_branch_date.get(branch, {}).get(latest_score_date, [])
-            detail_row = next((row for row in latest_rows if row["scene"] == PICKUP_SCORE_SCENE), None)
-            if detail_row is None:
-                detail_row = next((row for row in latest_rows if row.get("shipment_timeout_abnormal_count") is not None or row.get("shipment_timeout_rate") is not None), None)
+            pickup_rows = [row for row in latest_rows if row["scene"] == PICKUP_SCORE_SCENE]
+            timeout_counts = [row["shipment_timeout_abnormal_count"] for row in pickup_rows if row.get("shipment_timeout_abnormal_count") is not None]
+            latest_timeout_count = sum(timeout_counts) if timeout_counts else None
+            rate_rows = [row for row in pickup_rows if row.get("shipment_timeout_rate") is not None]
+            if len(rate_rows) == 1:
+                latest_timeout_rate = rate_rows[0]["shipment_timeout_rate"]
+            elif rate_rows:
+                weighted_rows = [row for row in rate_rows if row.get("shipment_timeout_abnormal_count") is not None and number(row.get("shipment_timeout_operation_count")) > 0]
+                if len(weighted_rows) == len(rate_rows):
+                    total_count = sum(row["shipment_timeout_abnormal_count"] for row in weighted_rows)
+                    total_operations = sum(row["shipment_timeout_operation_count"] for row in weighted_rows)
+                    latest_timeout_rate = round(total_count / total_operations * 100, 4) if total_operations else None
+                else:
+                    latest_timeout_rate = round(sum(row["shipment_timeout_rate"] for row in rate_rows) / len(rate_rows), 4)
+            else:
+                latest_timeout_rate = None
             high.append({"branch": branch, "parent_name": parent, "stagnant_score": score,
                 "is_new": rolling_score(branch, previous_day) < 6 or rolling_score(branch, two_days_prior) < 6,
                 "deduction_level": deduction["level"], "deduction_average": deduction["average"],
                 "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],
                 "latest_score_date": latest_score_date,
-                "latest_daily_score": daily_scores.get(branch, {}).get(latest_score_date) if latest_score_date else None,
-                "latest_timeout_count": detail_row.get("shipment_timeout_abnormal_count") if detail_row else None,
-                "latest_timeout_rate": detail_row.get("shipment_timeout_rate") if detail_row else None,
+                "latest_timeout_count": latest_timeout_count,
+                "latest_timeout_rate": latest_timeout_rate,
                 "clearout_count": clear["count"], "last_clearout_date": clear["last_date"], "last_clearout_type": clear["last_type"]})
         high.sort(key=lambda r: (-r["stagnant_score"], -r["clearout_count"], r["branch"]))
         high_scores_by_date[day] = high

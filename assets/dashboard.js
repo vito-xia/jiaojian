@@ -131,7 +131,6 @@
       row.deduction_level,
       row.deduction_average,
       row.latest_score_date,
-      row.latest_daily_score,
       row.latest_timeout_count,
       row.latest_timeout_rate,
       row.clearout_count,
@@ -180,10 +179,6 @@
     return `<span class="action-pill ${kind}">${label}</span>`;
   }
 
-  function latestDeductionCell(row) {
-    const score = row.latest_daily_score === null || row.latest_daily_score === undefined ? '—' : formatNumber(row.latest_daily_score) + '分';
-    return '<strong class="latest-deduction">' + score + '</strong><span class="subline">' + shortDate(row.latest_score_date) + '</span>';
-  }
 
   function feedbackResultChip(value) {
     const label = String(value || '—');
@@ -960,7 +955,7 @@
         <td>${branchButton(row.branch, row.parent_name)}</td>
         <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${row.is_new ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
         <td>${deductionLevelChip(row)}</td>
-        <td>${latestDeductionCell(row)}</td>
+        <td>${shortDate(row.latest_score_date)}</td>
         <td>${formatOptionalNumber(row.latest_timeout_count)}</td>
         <td><span class="rate">${formatOptionalRate(row.latest_timeout_rate)}</span></td>
         <td>${formatNumber(row.clearout_count)}次</td>
