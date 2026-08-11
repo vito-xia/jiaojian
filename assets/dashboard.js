@@ -42,7 +42,7 @@
   }
 
   function ensureControlsData() {
-    return data.controls_by_date ? Promise.resolve(data) : loadDataChunk('controls');
+    return data.controls_by_date && Array.isArray(data.extreme_records) ? Promise.resolve(data) : loadDataChunk('controls');
   }
 
   function ensureDeliveryData() {
@@ -51,11 +51,11 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
-  const JD_PAGE_SIZES = Object.freeze([10, 20, 30]);
+  const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
   let jdPeriodContext = null;
@@ -90,13 +90,18 @@
   function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
   function topRows() {
     const platform = data.platforms?.[state.platform] || {};
-    return state.platform === "\u4eac\u4e1c"
+    return state.platform === "\u6296\u97f3" || state.platform === "\u4eac\u4e1c"
       ? platform.top60_by_date?.[state.date] || top10Rows()
       : top10Rows();
   }
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
   function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
+  function currentExtremeRecords() {
+    return [...(data.extreme_records || [])]
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.branch || '').localeCompare(String(b.branch || ''), 'zh-CN'))
+      .slice(0, 20);
+  }
   function deliveryMonitor() { return data.delivery_monitor || {}; }
   function currentDeliveryControls() { return deliveryMonitor().controls_by_date?.[state.date] || []; }
   function currentDeliveryHighScores() { return deliveryMonitor().high_scores_by_date?.[state.date] || []; }
@@ -116,7 +121,19 @@
       row.parent_name,
       row.control_action,
       row.control_status,
+      row.scene,
+      row.abnormal_level,
+      row.collaboration_status,
+      row.feedback_result,
+      row.timeout_count,
+      row.timeout_rate,
       row.stagnant_score,
+      row.deduction_level,
+      row.deduction_average,
+      row.latest_score_date,
+      row.latest_daily_score,
+      row.latest_timeout_count,
+      row.latest_timeout_rate,
       row.clearout_count,
       row.last_clearout_date,
       row.last_clearout_type
@@ -124,6 +141,7 @@
   }
   function filteredControls() { return filterPlatformRows(currentControls()); }
   function filteredScores() { return filterPlatformRows(currentScores()); }
+  function filteredExtremeRecords() { return filterPlatformRows(currentExtremeRecords()); }
   function currentDataLabel() { return state.platform === '京东' ? 'T-2' : 'T-1'; }
   function currentWindowLabel() { return state.platform === '京东' ? 'T-8 至 T-2' : 'T-7 至 T-1'; }
   function trendWindowLabel() { return '最近 15 天'; }
@@ -141,6 +159,17 @@
     return `<span class="score-chip ${scoreClass(value)}">${formatNumber(value)}</span>`;
   }
 
+  function deductionLevelChip(row) {
+    const level = row.deduction_level || '—';
+    if (level === '超长单扣分' || level === '未扣分') return '<span class="deduction-level long-order">超长单扣分</span>';
+    if (level === '—') return '<span class="deduction-level empty">—</span>';
+    const levels = ['100-', '100-500', '500-1000', '1K-2K', '2K-5K', '5K-1W', '1W+'];
+    const index = Math.max(0, levels.indexOf(level));
+    const average = row.deduction_average === null || row.deduction_average === undefined ? '—' : formatNumber(row.deduction_average);
+    const days = Number(row.deduction_days || 0);
+    return '<span class="deduction-level level-' + index + '">' + escapeHtml(level) + '</span><span class="subline">日均 ' + average + ' 票 · ' + days + '天</span>';
+  }
+
   function actionPill(action) {
     const labels = {
       '揽收能力预警': ['notice', '揽收预警'],
@@ -149,6 +178,21 @@
     };
     const [kind, label] = labels[action] || ['none', '暂无管控'];
     return `<span class="action-pill ${kind}">${label}</span>`;
+  }
+
+  function latestDeductionCell(row) {
+    const score = row.latest_daily_score === null || row.latest_daily_score === undefined ? '—' : formatNumber(row.latest_daily_score) + '分';
+    return '<strong class="latest-deduction">' + score + '</strong><span class="subline">' + shortDate(row.latest_score_date) + '</span>';
+  }
+
+  function feedbackResultChip(value) {
+    const label = String(value || '—');
+    const kind = label === '待反馈' ? 'pending'
+      : label === '反馈超时' ? 'timeout'
+      : label.startsWith('审核驳回') ? 'rejected'
+      : label.startsWith('审核通过') ? 'passed'
+      : 'neutral';
+    return '<span class="feedback-result ' + kind + '">' + escapeHtml(label) + '</span>';
   }
 
   function rankBadge(rank) {
@@ -285,15 +329,15 @@
   }
 
 
-  function renderJdPageSizeControl(active) {
-    const control = $("#jdPageSizeControl");
+  function renderTopPageSizeControl(active) {
+    const control = $("#topPageSizeControl");
     const pagination = $("#top10Pagination");
     if (!control) return;
     control.hidden = !active;
     if (pagination) pagination.hidden = !active;
     if (active) {
-      const input = $("#jdPageSize");
-      if (input) input.value = String(state.jdPageSize);
+      const input = $("#topPageSize");
+      if (input) input.value = String(state.topPageSize);
     }
   }
 
@@ -353,6 +397,7 @@
       state.date = '';
       state.controlPage = 1;
       state.scorePage = 1;
+      state.extremePage = 1;
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
       state.topPage = 1;
@@ -376,6 +421,7 @@
       state.date = event.target.value;
       state.controlPage = 1;
       state.scorePage = 1;
+      state.extremePage = 1;
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
       state.topPage = 1;
@@ -388,9 +434,11 @@
       state.platformQuery = event.target.value;
       state.controlPage = 1;
       state.scorePage = 1;
+      state.extremePage = 1;
       renderPlatformSearch();
       renderControls();
       renderScores();
+      renderExtremeRecords();
     });
     $('#platformSearch').addEventListener('keydown', event => {
       if (event.key === 'Escape' && state.platformQuery) {
@@ -399,9 +447,11 @@
         event.target.value = '';
         state.controlPage = 1;
         state.scorePage = 1;
+        state.extremePage = 1;
         renderPlatformSearch();
         renderControls();
         renderScores();
+        renderExtremeRecords();
       }
     });
     $('#clearPlatformSearch').addEventListener('click', () => {
@@ -409,9 +459,11 @@
       $('#platformSearch').value = '';
       state.controlPage = 1;
       state.scorePage = 1;
+      state.extremePage = 1;
       renderPlatformSearch();
       renderControls();
       renderScores();
+      renderExtremeRecords();
       $('#platformSearch').focus();
     });
     $('#deliverySearch').addEventListener('input', event => {
@@ -478,10 +530,10 @@
       renderBranchSearch();
       $('#branchSearch').focus();
     });
-    $("#jdPageSize")?.addEventListener("change", event => {
+    $("#topPageSize")?.addEventListener("change", event => {
       const value = Number(event.target.value);
-      if (!JD_PAGE_SIZES.includes(value)) return;
-      state.jdPageSize = value;
+      if (!TOP_PAGE_SIZES.includes(value)) return;
+      state.topPageSize = value;
       state.topPage = 1;
       state.jdControlPage = 1;
       renderTop10();
@@ -527,6 +579,7 @@
 
     $('#controlPagination').addEventListener('click', event => changePage(event, 'control'));
     $('#scorePagination').addEventListener('click', event => changePage(event, 'score'));
+    $('#extremePagination').addEventListener('click', event => changePage(event, 'extreme'));
     $('#deliveryControlPagination').addEventListener('click', event => changePage(event, 'delivery-control'));
     $('#deliveryHighScorePagination').addEventListener('click', event => changePage(event, 'delivery-high-score'));
     $('#jdControlPagination')?.addEventListener('click', event => changePage(event, 'jd-control'));
@@ -571,6 +624,7 @@
     $('#dateSelect').value = next;
     state.controlPage = 1;
     state.scorePage = 1;
+    state.extremePage = 1;
     state.topPage = 1;
     state.jdControlPage = 1;
     updateDateButtons();
@@ -603,7 +657,8 @@
     $('#metaStrip').innerHTML = metaItems.map((item, index) => `<span>${index ? '<i></i>' : ''}${escapeHtml(item)}</span>`).join('');
     setText('#top10Platform', state.platform);
     setText('#top10Date', state.date || '—');
-    setText('#warningSubtitle', `${currentDataLabel()} 交件超时 TOP10 客户，点击分部查看全部客户${trendWindowLabel()}的趋势。`);
+    const rankingSize = state.platform === '抖音' || state.platform === '京东' ? 'TOP60' : 'TOP10';
+    setText('#warningSubtitle', `${currentDataLabel()} 交件超时 ${rankingSize} 客户，点击分部查看全部客户${trendWindowLabel()}的趋势。`);
     setText('#branchSearchDescription', state.platform === '京东' ? '输入客户、分部或一级公司名称，查看匹配网点最近8个自然日客户交件超时情况。' : '输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。');
     const methodology = $('#methodologySection');
     if (methodology) methodology.hidden = state.platform === '京东';
@@ -713,9 +768,10 @@
     const rows = topRows();
     const douyin = state.platform === '抖音';
     const jd = state.platform === '京东';
-    const pageSize = jd ? state.jdPageSize : rows.length || PAGE_SIZE;
+    const paginated = douyin || jd;
+    const pageSize = paginated ? state.topPageSize : rows.length || PAGE_SIZE;
     renderJdThresholdControls(jd);
-    renderJdPageSizeControl(jd);
+    renderTopPageSizeControl(paginated);
     const table = $('#top10Table');
     table.style.minWidth = douyin ? '1500px' : jd ? '1200px' : '1120px';
     table.classList.toggle('douyin-columns', douyin);
@@ -726,9 +782,9 @@
         ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>36H超时量</th><th>36H超时率</th><th>48H超时量</th><th>48H超时率</th><th>上榜次数</th><th>发运兜底</th></tr>'
         : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
-    const pages = jd ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
+    const pages = paginated ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
     state.topPage = Math.min(state.topPage, pages);
-    const pageRows = jd ? rows.slice((state.topPage - 1) * pageSize, state.topPage * pageSize) : rows;
+    const pageRows = paginated ? rows.slice((state.topPage - 1) * pageSize, state.topPage * pageSize) : rows;
     if (!rows.length) {
       const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
       $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 11 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
@@ -749,12 +805,12 @@
 
     const pagination = $("#top10Pagination");
     if (pagination) {
-      pagination.hidden = !jd;
-      if (jd) renderPagination(pagination, state.topPage, pages, rows.length, "top10");
+      pagination.hidden = !paginated;
+      if (paginated) renderPagination(pagination, state.topPage, pages, rows.length, "top10");
     }
 
     setText('#warningStatus', douyin ? '聚焦最高风险客户' : jd ? '聚焦 48H 最高风险' : '内部交件预警');
-    setText('#top10Caption', douyin ? '按 36H 交件超时量降序 · 平台风险字段已联动' : jd ? `按 ${currentDataLabel()} 48H 交件超时量降序 · 上榜阈值 ≥${formatNumber(state.jdThresholdCount)}票且 ≥${formatNumber(state.jdThresholdRate)}%` : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
+    setText('#top10Caption', douyin ? '当日 TOP60 · 按 36H 交件超时量降序 · 平台风险字段已联动' : jd ? `按 ${currentDataLabel()} 48H 交件超时量降序 · 上榜阈值 ≥${formatNumber(state.jdThresholdCount)}票且 ≥${formatNumber(state.jdThresholdRate)}%` : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
     $('#top10Footnote').textContent = douyin
       ? '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
       : jd
@@ -851,15 +907,16 @@
     $('#platform-control').hidden = !douyin;
     $('#platformControlNav').hidden = !douyin;
     if (!douyin) return;
-    if (!data.controls_by_date) {
+    if (!data.controls_by_date || !Array.isArray(data.extreme_records)) {
       setText('#controlStatus', '平台管控数据加载中');
       setText('#platformSearchHint', '平台管控数据加载中');
       return;
     }
-    setText('#controlStatus', `抖音平台数据已接入 · 更新至 ${shortDate(currentControlDate())}`);
+    setText('#controlStatus', '抖音平台数据已接入 · 更新至 ' + shortDate(currentControlDate()));
     renderPlatformSearch();
     renderControls();
     renderScores();
+    renderExtremeRecords();
   }
 
   function renderPlatformSearch() {
@@ -869,10 +926,10 @@
     if (input.value !== state.platformQuery) input.value = state.platformQuery;
     clear.hidden = !state.platformQuery;
     if (!query) {
-      setText('#platformSearchHint', `管控更新至 ${shortDate(currentControlDate())} · ${currentControls().length} 条管控记录 · ${currentScores().length} 个高积分网点`);
+      setText('#platformSearchHint', currentScores().length + ' 个高积分网点 · ' + currentControls().length + ' 条管控记录 · ' + currentExtremeRecords().length + ' 条极差熔断');
       return;
     }
-    setText('#platformSearchHint', `找到 ${filteredControls().length} 条管控记录 · ${filteredScores().length} 个高积分网点`);
+    setText('#platformSearchHint', '找到 ' + filteredScores().length + ' 个高积分网点 · ' + filteredControls().length + ' 条管控记录 · ' + filteredExtremeRecords().length + ' 条极差熔断');
   }
   function renderControls() {
     const rows = filteredControls();
@@ -901,12 +958,32 @@
       const width = Math.min(100, Number(row.stagnant_score || 0) / 12 * 100);
       return `<tr>
         <td>${branchButton(row.branch, row.parent_name)}</td>
-        <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span></div></td>
+        <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${row.is_new ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
+        <td>${deductionLevelChip(row)}</td>
+        <td>${latestDeductionCell(row)}</td>
+        <td>${formatOptionalNumber(row.latest_timeout_count)}</td>
+        <td><span class="rate">${formatOptionalRate(row.latest_timeout_rate)}</span></td>
         <td>${formatNumber(row.clearout_count)}次</td>
         <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="4">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="8">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
+  }
+
+  function renderExtremeRecords() {
+    const rows = filteredExtremeRecords();
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    state.extremePage = Math.min(state.extremePage, pages);
+    const pageRows = rows.slice((state.extremePage - 1) * PAGE_SIZE, state.extremePage * PAGE_SIZE);
+    setText('#extremeCount', rows.length + ' 条');
+    $('#extremeBody').innerHTML = pageRows.length ? pageRows.map(row => '<tr>' +
+      '<td>' + shortDate(row.date) + '</td>' +
+      '<td>' + branchButton(row.branch, row.parent_name) + '</td>' +
+      '<td>' + feedbackResultChip(row.feedback_result) + '</td>' +
+      '<td>' + formatOptionalNumber(row.timeout_count) + '</td>' +
+      '<td><span class="rate">' + formatOptionalRate(row.timeout_rate) + '</span></td>' +
+    '</tr>').join('') : '<tr class="empty-row"><td colspan="5">' + (state.platformQuery ? '最近 20 条中没有匹配当前关键词的极差熔断记录' : '近一个月暂无极端异常记录') + '</td></tr>';
+    renderPagination($('#extremePagination'), state.extremePage, pages, rows.length, 'extreme');
   }
 
   function deliveryActionPill(action) {
@@ -1002,6 +1079,7 @@
     const page = Number(button.dataset.page);
     if (kind === 'control') { state.controlPage = page; renderControls(); }
     else if (kind === 'score') { state.scorePage = page; renderScores(); }
+    else if (kind === 'extreme') { state.extremePage = page; renderExtremeRecords(); }
     else if (kind === 'delivery-control') { state.deliveryControlPage = page; renderDeliveryControls(); }
     else if (kind === 'delivery-high-score') { state.deliveryHighScorePage = page; renderDeliveryHighScores(); }
     else if (kind === 'top10') { state.topPage = page; renderTop10(); }
@@ -1028,7 +1106,8 @@
     const candidates = [
       ...top10Rows().filter(row => row.branch === branch),
       ...currentControls().filter(row => row.branch === branch),
-      ...currentScores().filter(row => row.branch === branch)
+      ...currentScores().filter(row => row.branch === branch),
+      ...currentExtremeRecords().filter(row => row.branch === branch)
     ];
     return candidates[0] || {};
   }

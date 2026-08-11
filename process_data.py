@@ -21,7 +21,10 @@ from openpyxl.utils.datetime import from_excel
 
 PLATFORM_ALIAS = {"淘天": "淘宝"}
 PLATFORMS = ("抖音", "淘宝", "京东", "快手")
-SCORE_SCENES = {"物流停滞-揽收端", "物流停滞-全链路"}
+PICKUP_SCORE_SCENE = "物流停滞-揽收端"
+LONG_ORDER_SCORE_SCENE = "物流停滞-全链路"
+SCORE_SCENES = {PICKUP_SCORE_SCENE, LONG_ORDER_SCORE_SCENE}
+DEDUCTION_SCORE_VALUES = {0.0, 1.0, 2.0}
 DELIVERY_SCORE_SCENES = {"物流停滞-派送端"}
 CONTROL_ACTIONS = {"揽收能力预警", "限制面单新签", "限制面单取号"}
 ACTION_SEVERITY = {"揽收能力预警": 1, "限制面单新签": 2, "限制面单取号": 3}
@@ -29,6 +32,13 @@ DELIVERY_CONTROL_ACTIONS = {"派送能力预警", "限制面单新签", "限制�
 DELIVERY_ACTION_SEVERITY = {"派送能力预警": 1, "限制面单新签": 2, "限制面单到达": 3}
 EXCLUDED_CUSTOMER_KEYWORDS = ("温宿韵通达", "新疆", "北亩")
 EMPTY_DETAIL_VALUES = {"", "-", "--", "—", "/", "无", "暂无"}
+FEEDBACK_RESULT_LABELS = {
+    "已审核-审核驳回（审核反馈为可抗力）": "审核驳回为可抗",
+    "已审核-审核通过（审核反馈为不可抗力）": "审核通过为不可抗力",
+    "已审核-审核通过（审核反馈为可抗力）": "审核通过为可抗力",
+    "待反馈": "待反馈",
+    "反馈超时": "反馈超时",
+}
 
 
 def text(value: Any) -> str:
@@ -74,6 +84,35 @@ def shipment_interval(value: int | None) -> str:
     if value <= 5000:
         return "1000-5000"
     return "5000+"
+
+
+def deduction_volume_level(value: float) -> str:
+    if value < 100:
+        return "100-"
+    if value < 500:
+        return "100-500"
+    if value < 1000:
+        return "500-1000"
+    if value < 2000:
+        return "1K-2K"
+    if value < 5000:
+        return "2K-5K"
+    if value < 10000:
+        return "5K-1W"
+    return "1W+"
+
+
+def feedback_result_label(value: Any) -> str:
+    status = text(value)
+    if status in FEEDBACK_RESULT_LABELS:
+        return FEEDBACK_RESULT_LABELS[status]
+    if "审核驳回" in status and "可抗力" in status and "不可抗力" not in status:
+        return "审核驳回为可抗"
+    if "审核通过" in status and "不可抗力" in status:
+        return "审核通过为不可抗力"
+    if "审核通过" in status and "可抗力" in status:
+        return "审核通过为可抗力"
+    return status or "—"
 
 
 def jd_delivery_metrics(timeout_36h: int, timeout_rate_36h: float, timeout_48h: int) -> dict[str, Any]:
@@ -346,6 +385,8 @@ def read_scores(data_dir: Path) -> tuple[list[dict[str, Any]], dict[str, dict[st
         records.append({
             "branch": branch,
             "scene": scene,
+            "abnormal_level": text(row[10]),
+            "collaboration_status": text(row[11]),
             "date": violation_date,
             "current_score": current,
             "cumulative_stagnant_score": snapshot,
@@ -539,6 +580,71 @@ def build_score_calculator(daily_scores: dict[str, dict[str, float]], window_day
     return rolling
 
 
+def build_pickup_deduction_calculator(score_rows: list[dict[str, Any]], window_days: int = 16):
+    daily_volume: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    daily_scores: dict[str, dict[str, set[int]]] = defaultdict(lambda: defaultdict(set))
+    long_order_scores: dict[str, dict[str, set[int]]] = defaultdict(lambda: defaultdict(set))
+    for row in score_rows:
+        score = number(row.get("current_score"))
+        branch, day = row.get("branch", ""), row.get("date", "")
+        if row.get("scene") == LONG_ORDER_SCORE_SCENE and branch and day:
+            long_order_scores[branch][day].add(int(score))
+        if row.get("scene") != PICKUP_SCORE_SCENE or score not in DEDUCTION_SCORE_VALUES or not branch or not day:
+            continue
+        daily_volume[branch][day] += number(row.get("shipment_timeout_abnormal_count"))
+        daily_scores[branch][day].add(int(score))
+
+    cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def summarize(branch: str, end_day: str) -> dict[str, Any]:
+        key = (branch, end_day)
+        if key not in cache:
+            end = iso_day(end_day)
+            start = end - timedelta(days=window_days - 1)
+            days = sorted(day for day in daily_volume.get(branch, {}) if start <= iso_day(day) <= end)
+            if not days:
+                long_days = sorted(day for day in long_order_scores.get(branch, {}) if start <= iso_day(day) <= end)
+                long_scores = sorted({score for day in long_days for score in long_order_scores[branch][day]})
+                cache[key] = {
+                    "level": "超长单扣分" if long_days else "—",
+                    "average": None,
+                    "days": len(long_days),
+                    "scores": long_scores,
+                }
+            else:
+                average = round(sum(daily_volume[branch][day] for day in days) / len(days), 2)
+                scores = sorted({score for day in days for score in daily_scores[branch][day]})
+                cache[key] = {
+                    "level": deduction_volume_level(average),
+                    "average": average,
+                    "days": len(days),
+                    "scores": scores,
+                }
+        return cache[key]
+
+    return summarize
+
+
+def build_extreme_records(score_rows: list[dict[str, Any]], mapping: dict[str, dict[str, str]], limit: int = 20) -> list[dict[str, Any]]:
+    records = []
+    for row in score_rows:
+        if row.get("abnormal_level") != "极端异常":
+            continue
+        branch = row.get("branch", "")
+        records.append({
+            "date": row.get("date", ""),
+            "branch": branch,
+            "parent_name": parent_of(branch, mapping),
+            "scene": row.get("scene", ""),
+            "abnormal_level": row.get("abnormal_level", ""),
+            "collaboration_status": row.get("collaboration_status", ""),
+            "feedback_result": feedback_result_label(row.get("collaboration_status")),
+            "timeout_count": row.get("shipment_timeout_abnormal_count"),
+            "timeout_rate": row.get("shipment_timeout_rate"),
+        })
+    records.sort(key=lambda row: (row["date"], row["branch"], row["scene"]), reverse=True)
+    return records[:limit]
+
 
 def build_delivery_monitor(controls, score_rows, daily_scores, cumulative_scores, mapping):
     score_dates = sorted({row["date"] for row in score_rows if row["scene"] in DELIVERY_SCORE_SCENES and row["date"]})
@@ -694,14 +800,18 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     # 平台管控是独立的实时快照，允许比交件 T-1 更新；不能用 as_of 截断 7 月 31 日的管控。
     current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, control_as_of)
     rolling_score = build_score_calculator(daily_scores)
+    pickup_deduction = build_pickup_deduction_calculator(score_rows)
+    extreme_records = build_extreme_records(score_rows, mapping)
     delivery_monitor = build_delivery_monitor(delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, mapping)
     top10_by_date = {p: {} for p in PLATFORMS}
-    top60_by_date = {"京东": {}}
+    top60_by_date = {"抖音": {}, "京东": {}}
     for platform in PLATFORMS:
         for day in dates_by_platform[platform]:
             rows_for_day = (r for r in timeout_rows if r["platform"] == platform and r["date"] == day)
             if platform == "京东":
                 daily = sorted(rows_for_day, key=lambda r: (-r["timeout_48h"], -number(r.get("timeout_rate_48h")), -r["timeout_36h"], r["branch"]))[:60]
+            elif platform == "抖音":
+                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:60]
             else:
                 daily = sorted(rows_for_day, key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:10]
             enriched = []
@@ -722,12 +832,16 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                     "last_clearout_type": clear["last_type"] if platform == "抖音" else "",
                     "history_shortage": history_shortage or {"months": [], "branches": [], "customer_count": 0},
                 })
-            if platform == "京东":
+            if platform in top60_by_date:
                 top60_by_date[platform][day] = enriched
                 top10_by_date[platform][day] = enriched[:10]
             else:
                 top10_by_date[platform][day] = enriched
     branch_events = [r for r in controls if r["is_branch_level"] and r["control_action"] in CONTROL_ACTIONS and r["start_date"]]
+    score_rows_by_branch_date: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for row in score_rows:
+        if row["scene"] in SCORE_SCENES:
+            score_rows_by_branch_date[row["branch"]][row["date"]].append(row)
     control_by_date, high_scores_by_date = {}, {}
     # 保留交件日期索引，同时补充最新管控快照日期，供前端在选择 7 月 30 日时展示 7 月 31 日管控。
     control_days = sorted(set(dates_by_platform["抖音"]) | {control_as_of})
@@ -753,7 +867,23 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 continue
             parent = parent_of(branch, mapping)
             clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
+            previous_day = (iso_day(day) - timedelta(days=1)).isoformat()
+            two_days_prior = (iso_day(day) - timedelta(days=2)).isoformat()
+            deduction = pickup_deduction(branch, day)
+            latest_dates = [date for date in score_rows_by_branch_date.get(branch, {}) if date <= day]
+            latest_score_date = max(latest_dates, default="")
+            latest_rows = score_rows_by_branch_date.get(branch, {}).get(latest_score_date, [])
+            detail_row = next((row for row in latest_rows if row["scene"] == PICKUP_SCORE_SCENE), None)
+            if detail_row is None:
+                detail_row = next((row for row in latest_rows if row.get("shipment_timeout_abnormal_count") is not None or row.get("shipment_timeout_rate") is not None), None)
             high.append({"branch": branch, "parent_name": parent, "stagnant_score": score,
+                "is_new": rolling_score(branch, previous_day) < 6 or rolling_score(branch, two_days_prior) < 6,
+                "deduction_level": deduction["level"], "deduction_average": deduction["average"],
+                "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],
+                "latest_score_date": latest_score_date,
+                "latest_daily_score": daily_scores.get(branch, {}).get(latest_score_date) if latest_score_date else None,
+                "latest_timeout_count": detail_row.get("shipment_timeout_abnormal_count") if detail_row else None,
+                "latest_timeout_rate": detail_row.get("shipment_timeout_rate") if detail_row else None,
                 "clearout_count": clear["count"], "last_clearout_date": clear["last_date"], "last_clearout_type": clear["last_type"]})
         high.sort(key=lambda r: (-r["stagnant_score"], -r["clearout_count"], r["branch"]))
         high_scores_by_date[day] = high
@@ -764,7 +894,8 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     current_merchant_executing = sum(merchant_counts.values())
     example_parent = "广东佛山南海新河村公司"
     platform_payloads = {p: {"dates": dates_by_platform[p], "top10_by_date": top10_by_date[p]} for p in PLATFORMS}
-    platform_payloads["京东"]["top60_by_date"] = top60_by_date["京东"]
+    for platform, rows_by_date in top60_by_date.items():
+        platform_payloads[platform]["top60_by_date"] = rows_by_date
     return {
         "meta": {
             "as_of": as_of, "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -781,11 +912,12 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 "excluded_timeout_rows": excluded_timeout_count,
                 "excluded_top5_rows": excluded_top5_count,
             },
-            "summary": {"executing_branch_controls": current_branch_executing, "executing_merchant_controls": current_merchant_executing, "historical_clearouts": len(clearouts)},
+            "summary": {"executing_branch_controls": current_branch_executing, "executing_merchant_controls": current_merchant_executing, "historical_clearouts": len(clearouts), "extreme_records": len(extreme_records)},
             "example_check": shortage.get("抖音", {}).get(example_parent, {"months": [], "branches": []}),
         },
         "platforms": platform_payloads,
         "controls_by_date": control_by_date, "high_scores_by_date": high_scores_by_date,
+        "extreme_records": extreme_records,
         "history_lookup": shortage,
         "history_all_lookup": shortage_all,
         "branch_top5_data": branch_top5_data,
@@ -843,6 +975,7 @@ def main() -> None:
         "controls": ("dashboard_controls.js", {
             "controls_by_date": dashboard["controls_by_date"],
             "high_scores_by_date": dashboard["high_scores_by_date"],
+            "extreme_records": dashboard["extreme_records"],
         }),
         "delivery": ("dashboard_delivery.js", {"delivery_monitor": dashboard["delivery_monitor"]}),
     }

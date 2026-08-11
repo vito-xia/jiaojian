@@ -87,46 +87,29 @@
         <div>
           <div class="section-kicker"><span class="kicker-index blue">01</span>风险联动</div>
           <h2>平台预警与管控</h2>
-          <p>左侧追踪最近 7 天平台动作，右侧锁定滚动 16 天停滞积分达到 6 分及以上的网点。</p>
+          <p>顶部锁定滚动 16 天停滞积分达到 6 分及以上的网点，下方联动平台管控与最近 20 条极差熔断反馈。</p>
         </div>
         <div class="section-status"><span class="status-dot active"></span><span id="controlStatus">抖音平台数据已接入</span></div>
       </div>
 
-
       <div class="platform-search-bar">
         <div class="platform-search-copy">
           <span>模块检索</span>
-          <strong>搜索管控与高积分网点</strong>
-          <small>保留两张表的现有字段与分页</small>
+          <strong>搜索高积分、管控与极差熔断记录</strong>
+          <small>同时筛选三张表，极差熔断仅保留最近 20 条</small>
         </div>
         <div class="platform-search-control">
           <label class="branch-search-input platform-search-input" for="platformSearch">
             <span class="search-glyph" aria-hidden="true"></span>
-            <input id="platformSearch" type="search" autocomplete="off" placeholder="搜索网点、一级公司、管控动作或状态">
+            <input id="platformSearch" type="search" autocomplete="off" placeholder="搜索网点、一级公司、管控动作或反馈结果">
             <button id="clearPlatformSearch" type="button" hidden>清除</button>
           </label>
           <span class="platform-search-hint" id="platformSearchHint">输入关键词筛选当前模块</span>
         </div>
       </div>
-      <div class="split-grid" id="platformPanels">
-        <article class="data-card panel-card">
-          <div class="panel-title">
-            <div>
-              <span class="panel-label">最近 7 天</span>
-              <h3>平台管控记录</h3>
-            </div>
-            <span class="record-count" id="controlCount">0 条</span>
-          </div>
-          <div class="table-scroll compact-scroll">
-            <table class="data-table compact-table">
-              <thead><tr><th>管控日期</th><th>网点名称</th><th>管控动作</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
-              <tbody id="controlBody"></tbody>
-            </table>
-          </div>
-          <div class="pagination" id="controlPagination" aria-label="管控记录分页"></div>
-        </article>
 
-        <article class="data-card panel-card">
+      <div class="platform-panel-stack" id="platformPanels">
+        <article class="data-card panel-card platform-score-card">
           <div class="panel-title">
             <div>
               <span class="panel-label warning">风险阈值 ≥ 6</span>
@@ -136,12 +119,48 @@
           </div>
           <div class="table-scroll compact-scroll">
             <table class="data-table compact-table score-table">
-              <thead><tr><th>网点名称</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
+              <thead><tr><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
               <tbody id="scoreBody"></tbody>
             </table>
           </div>
           <div class="pagination" id="scorePagination" aria-label="高积分网点分页"></div>
         </article>
+
+        <div class="split-grid platform-bottom-grid">
+          <article class="data-card panel-card">
+            <div class="panel-title">
+              <div>
+                <span class="panel-label">最近 7 天</span>
+                <h3>平台管控记录</h3>
+              </div>
+              <span class="record-count" id="controlCount">0 条</span>
+            </div>
+            <div class="table-scroll compact-scroll">
+              <table class="data-table compact-table control-table">
+                <thead><tr><th>管控日期</th><th>网点名称</th><th>管控动作</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
+                <tbody id="controlBody"></tbody>
+              </table>
+            </div>
+            <div class="pagination" id="controlPagination" aria-label="管控记录分页"></div>
+          </article>
+
+          <article class="data-card panel-card extreme-card">
+            <div class="panel-title">
+              <div>
+                <span class="panel-label critical">最近 20 条</span>
+                <h3>极差熔断记录</h3>
+              </div>
+              <span class="record-count" id="extremeCount">0 条</span>
+            </div>
+            <div class="table-scroll compact-scroll">
+              <table class="data-table compact-table extreme-table">
+                <thead><tr><th>违规日期</th><th>网点名称</th><th>反馈结果</th><th>超时单量</th><th>超时率</th></tr></thead>
+                <tbody id="extremeBody"></tbody>
+              </table>
+            </div>
+            <div class="pagination" id="extremePagination" aria-label="极差熔断记录分页"></div>
+          </article>
+        </div>
       </div>
      </section>
 
@@ -183,9 +202,9 @@
             <label><span>统计天数</span><span class="jd-days-input"><input id="jdWindowDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-label="京东上榜统计自然日天数" value="15"><i>天</i></span></label>
             <button id="resetJdThresholds" type="button">恢复默认</button>
           </div>
-          <div class="jd-page-size-control" id="jdPageSizeControl" hidden>
+          <div class="top-page-size-control" id="topPageSizeControl" hidden>
             <span>每页展示</span>
-            <select id="jdPageSize" aria-label="京东每页展示客户数">
+            <select id="topPageSize" aria-label="交件预警每页展示客户数">
               <option value="10">10</option>
               <option value="20">20</option>
               <option value="30">30</option>
@@ -199,7 +218,7 @@
             <tbody id="top10Body"></tbody>
           </table>
         </div>
-        <div class="pagination" id="top10Pagination" aria-label="京东客户分页" hidden></div>
+        <div class="pagination" id="top10Pagination" aria-label="交件预警客户分页" hidden></div>
         <div class="card-footnote" id="top10Footnote"></div>
       </article>
      </section>
