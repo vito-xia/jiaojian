@@ -115,15 +115,26 @@ def feedback_result_label(value: Any) -> str:
     return status or "—"
 
 
-def jd_delivery_metrics(timeout_36h: int, timeout_rate_36h: float, timeout_48h: int) -> dict[str, Any]:
+def jd_delivery_metrics(
+    timeout_36h: int,
+    timeout_rate_36h: float,
+    timeout_48h: int,
+    timeout_72h: int,
+    timeout_96h: int,
+) -> dict[str, Any]:
     """京东派生口径：源表超时率为百分点，计算时需先除以 100。"""
     rate = number(timeout_rate_36h)
     shipment_volume = int(round(timeout_36h * 100 / rate)) if rate > 0 else None
-    timeout_rate_48h = round(timeout_48h / shipment_volume * 100, 4) if shipment_volume else None
+
+    def timeout_rate(timeout_amount: int) -> float | None:
+        return round(timeout_amount / shipment_volume * 100, 4) if shipment_volume else None
+
     return {
         "shipment_volume": shipment_volume,
         "shipment_interval": shipment_interval(shipment_volume),
-        "timeout_rate_48h": timeout_rate_48h,
+        "timeout_rate_48h": timeout_rate(timeout_48h),
+        "timeout_rate_72h": timeout_rate(timeout_72h),
+        "timeout_rate_96h": timeout_rate(timeout_96h),
     }
 
 
@@ -274,7 +285,13 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
                 "timeout_120h": integer(row[12]),
             }
             if platform == "京东":
-                record.update(jd_delivery_metrics(record["timeout_36h"], record["timeout_rate_36h"], record["timeout_48h"]))
+                record.update(jd_delivery_metrics(
+                    record["timeout_36h"],
+                    record["timeout_rate_36h"],
+                    record["timeout_48h"],
+                    record["timeout_72h"],
+                    record["timeout_96h"],
+                ))
             records.append(record)
         workbook.close()
     return records
@@ -718,7 +735,13 @@ def build_trends(timeout_rows: list[dict[str, Any]], mapping: dict[str, dict[str
         })
         point = {k: row[k] for k in ("date", "timeout_24h", "timeout_36h", "timeout_rate_36h", "timeout_48h", "timeout_72h", "timeout_96h", "timeout_120h")}
         if row["platform"] == "京东":
-            point.update({k: row.get(k) for k in ("shipment_volume", "shipment_interval", "timeout_rate_48h")})
+            point.update({k: row.get(k) for k in (
+                "shipment_volume",
+                "shipment_interval",
+                "timeout_rate_48h",
+                "timeout_rate_72h",
+                "timeout_rate_96h",
+            )})
         customer_box["series"].append(point)
         customer_box["total_36h"] += row["timeout_36h"]
     result = {p: {} for p in PLATFORMS}

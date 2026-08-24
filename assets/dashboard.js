@@ -52,10 +52,11 @@
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
+  const JD_TREND_HOURS = Object.freeze([48, 72, 96]);
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
   let jdPeriodContext = null;
@@ -72,6 +73,33 @@
   }
   function formatOptionalNumber(value) { return value === null || value === undefined ? '—' : formatNumber(value); }
   function formatOptionalRate(value) { return value === null || value === undefined ? '—' : formatRate(value); }
+  function jdTrendMetric(hours = state.jdTrendHours) {
+    const numericHours = Number(hours);
+    const normalizedHours = JD_TREND_HOURS.includes(numericHours) ? numericHours : 48;
+    return {
+      hours: normalizedHours,
+      countField: 'timeout_' + normalizedHours + 'h',
+      rateField: 'timeout_rate_' + normalizedHours + 'h'
+    };
+  }
+  function jdTimeoutRate(point, hours) {
+    const metric = jdTrendMetric(hours);
+    const sourceRate = point?.[metric.rateField];
+    if (sourceRate !== null && sourceRate !== undefined && sourceRate !== '' && Number.isFinite(Number(sourceRate))) {
+      return Number(sourceRate);
+    }
+    const shipmentVolume = Number(point?.shipment_volume);
+    if (!shipmentVolume) return null;
+    return Number(point?.[metric.countField] || 0) / shipmentVolume * 100;
+  }
+  function withJdTimeoutRates(point) {
+    return {
+      ...point,
+      timeout_rate_48h: jdTimeoutRate(point, 48),
+      timeout_rate_72h: jdTimeoutRate(point, 72),
+      timeout_rate_96h: jdTimeoutRate(point, 96)
+    };
+  }
   function shortDate(value) { return value ? String(value).slice(0, 10) : '—'; }
   function shiftDate(value, offset) {
     const day = new Date(`${value}T00:00:00`);
@@ -768,13 +796,13 @@
     renderJdThresholdControls(jd);
     renderTopPageSizeControl(paginated);
     const table = $('#top10Table');
-    table.style.minWidth = douyin ? '1500px' : jd ? '1200px' : '1120px';
+    table.style.minWidth = douyin ? '1500px' : jd ? '1160px' : '1120px';
     table.classList.toggle('douyin-columns', douyin);
     table.classList.toggle('jd-columns', jd);
     $('#top10Head').innerHTML = douyin
       ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
       : jd
-        ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>36H超时量</th><th>36H超时率</th><th>48H超时量</th><th>48H超时率</th><th>上榜次数</th><th>发运兜底</th></tr>'
+        ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>48H量</th><th>48H率</th><th>72H量</th><th>72H率</th><th>96H量</th><th>96H率</th><th>上榜次数</th><th>发运兜底</th></tr>'
         : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
     const pages = paginated ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
@@ -782,13 +810,13 @@
     const pageRows = paginated ? rows.slice((state.topPage - 1) * pageSize, state.topPage * pageSize) : rows;
     if (!rows.length) {
       const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
-      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 11 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
+      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 13 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
     } else {
       $('#top10Body').innerHTML = pageRows.map(row => {
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
         const identity = `<td>${rankBadge(row.rank)}</td><td>${branchButton(row.branch, row.parent_name)}</td><td>${customer}</td>`;
         if (jd) {
-          return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td>${formatNumber(row.timeout_36h)}</td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(row.timeout_rate_48h)}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
+          return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 48))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_72h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 72))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_96h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 96))}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
         }
         const common = `${identity}<td><span class="metric-number">${formatNumber(row.timeout_36h)}</span></td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td>`;
         if (!douyin) {
@@ -809,7 +837,7 @@
     $('#top10Footnote').textContent = douyin
       ? '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
       : jd
-        ? `发货量 = 36H超时量 ÷ (36H超时率 / 100)，四舍五入取整；48H超时率 = 48H超时量 ÷ 发货量。上榜次数按所选数据日向前共 ${state.jdThresholdDays} 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。`
+        ? `发货量仍由 36H超时量 ÷ (36H超时率 / 100) 反推并四舍五入取整；48H/72H/96H超时率 = 对应超时量 ÷ 发货量。上榜次数按所选数据日向前共 ${state.jdThresholdDays} 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。`
         : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
   }
 
@@ -1294,6 +1322,47 @@
     $('#jdPeriodStart').value = periodStart;
     $('#jdPeriodEnd').value = periodEnd;
   }
+  function renderCustomerTrendCharts(customers, range, jd) {
+    const panel = $('#drawerCharts');
+    if (!panel) return;
+    chartJobs = chartJobs.filter(job => job.kind !== 'customer');
+    if (!customers.length) {
+      panel.innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
+      return;
+    }
+    const metric = jd ? jdTrendMetric() : { hours: 36, countField: 'timeout_36h', rateField: 'timeout_rate_36h' };
+    const metricLabel = metric.hours + 'H';
+    const headingMeta = `${trendWindowLabel()} · ${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示`;
+    const selector = jd
+      ? '<label class="jd-trend-filter" for="jdTrendMetric"><span>趋势口径</span><select id="jdTrendMetric" aria-label="京东客户交件量率趋势口径">'
+        + JD_TREND_HOURS.map(hours => '<option value="' + hours + '"' + (hours === metric.hours ? ' selected' : '') + '>' + hours + 'H量率</option>').join('')
+        + '</select></label>'
+      : '';
+    const heading = jd
+      ? `<div class="charts-heading jd-charts-heading"><div><h3>全部客户趋势</h3><span>${headingMeta}</span></div>${selector}</div>`
+      : `<div class="charts-heading"><h3>全部客户趋势</h3><span>${headingMeta}</span></div>`;
+    panel.innerHTML = heading + customers.map((customer, index) => {
+      const latest = customer.series.at(-1);
+      const total = customer.series.reduce((sum, point) => sum + Number(point[metric.countField] || 0), 0);
+      const latestRate = jd ? jdTimeoutRate(latest, metric.hours) : latest?.[metric.rateField];
+      const detail = jd
+        ? `发货量 · ${formatOptionalNumber(latest?.shipment_volume)} · ${escapeHtml(latest?.shipment_interval || '无法计算')} · ${currentDataLabel()} ${metricLabel}超时率 ${formatOptionalRate(latestRate)}`
+        : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latestRate)}`;
+      return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(total)}</strong><span>${trendWindowLabel()} ${metricLabel}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${metricLabel}超时量</span><span><i class="line"></i>${metricLabel}超时率</span></div></article>`;
+    }).join('');
+    $('#jdTrendMetric')?.addEventListener('change', event => {
+      state.jdTrendHours = jdTrendMetric(event.target.value).hours;
+      renderCustomerTrendCharts(customers, range, jd);
+    });
+    requestAnimationFrame(() => {
+      customers.forEach((customer, index) => {
+        const canvas = $(`#chart-${index}`);
+        const draw = () => drawComboChart(canvas, customer.series, metric.countField, metric.rateField);
+        chartJobs.push({ kind: 'customer', canvas, draw });
+        draw();
+      });
+    });
+  }
   function renderDeliveryScoreTrend(branch, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
@@ -1397,6 +1466,7 @@
       }
     }
     const jd = state.platform === '京东';
+    if (jd) state.jdTrendHours = 48;
     const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
     const branchData = data.trends?.[state.platform]?.[branch];
     const parent = branchData?.parent_name || branchRisk(branch).parent_name || branch;
@@ -1406,8 +1476,8 @@
       const series = range.map(day => {
         const sourcePoint = byDate.get(day);
         return sourcePoint
-          ? { ...sourcePoint, hasSourcePoint: true }
-          : { date: day, timeout_36h: 0, timeout_rate_36h: 0, timeout_48h: 0, timeout_rate_48h: null, timeout_72h: 0, timeout_96h: 0, shipment_volume: null, shipment_interval: '无法计算', hasSourcePoint: false };
+          ? { ...(jd ? withJdTimeoutRates(sourcePoint) : sourcePoint), hasSourcePoint: true }
+          : { date: day, timeout_36h: 0, timeout_rate_36h: 0, timeout_48h: 0, timeout_rate_48h: null, timeout_72h: 0, timeout_rate_72h: null, timeout_96h: 0, timeout_rate_96h: null, shipment_volume: null, shipment_interval: '无法计算', hasSourcePoint: false };
       });
       const hasSourcePoint = series.some(point => point.hasSourcePoint);
       const total = series.reduce((sum, point) => sum + Number(point[timeoutField] || 0), 0);
@@ -1466,25 +1536,7 @@
         scorePanel.innerHTML = '';
       }
     }
-    if (!customers.length) {
-      $('#drawerCharts').innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
-    } else {
-      $('#drawerCharts').innerHTML = `<div class="charts-heading"><h3>全部客户趋势</h3><span>${trendWindowLabel()} · ${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示</span></div>${customers.map((customer, index) => {
-        const latest = customer.series.at(-1);
-        const detail = jd
-          ? `发货量 · ${formatOptionalNumber(latest.shipment_volume)} · ${escapeHtml(latest.shipment_interval || '无法计算')} · ${currentDataLabel()} 48H超时率 ${formatOptionalRate(latest.timeout_rate_48h)}`
-          : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latest.timeout_rate_36h)}`;
-        return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(customer.total)}</strong><span>${trendWindowLabel()} ${jd ? '48H' : '36H'}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${jd ? '48H' : '36H'}超时量</span><span><i class="line"></i>${jd ? '48H' : '36H'}超时率</span></div></article>`;
-      }).join('')}`;
-      requestAnimationFrame(() => {
-        customers.forEach((customer, index) => {
-          const canvas = $(`#chart-${index}`);
-          const draw = () => drawComboChart(canvas, customer.series, jd ? 'timeout_48h' : 'timeout_36h', jd ? 'timeout_rate_48h' : 'timeout_rate_36h');
-          chartJobs.push({ kind: 'customer', canvas, draw });
-          draw();
-        });
-      });
-    }
+    renderCustomerTrendCharts(customers, range, jd);
     const layer = $('#drawerLayer');
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
