@@ -154,7 +154,176 @@ def excel_column_number(letters: str) -> int:
     return result
 
 
-def merged_reason_action_rows(path: Path, sheet_name: str) -> set[int]:
+def normalize_header(value: Any) -> str:
+    return re.sub(r"\s+", "", text(value)).lower()
+
+
+def fill_header_band(row: tuple[Any, ...]) -> list[str]:
+    filled: list[str] = []
+    current = ""
+    for value in row:
+        current = text(value) or current
+        filled.append(current)
+    return filled
+
+
+def canonical_top5_platform(value: Any) -> str:
+    name = normalize_header(value)
+    if "抖音" in name:
+        return "抖音"
+    if "淘宝" in name or "淘天" in name:
+        return "淘宝"
+    return PLATFORM_ALIAS.get(text(value), text(value))
+
+
+def top5_metric_header(value: Any) -> str:
+    name = normalize_header(value).replace("超过", "超")
+    match = re.search(r"(?:超)?(24|36|48)(?:h|小时)", name)
+    return f"{match.group(1)}h" if match else ""
+
+
+def top5_measure_header(value: Any) -> str:
+    name = normalize_header(value)
+    if "率" in name:
+        return "rate"
+    if "票件量" in name or "单量" in name or "超时量" in name:
+        return "value"
+    return ""
+
+
+def top5_column_map(sheet) -> tuple[dict[str, Any], int]:
+    preview = list(sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 80), values_only=True))
+    required_headers = {"上榜日期", "分部名称", "客户名称", "客户编码", "平台", "上榜次数"}
+    header_index = next(
+        (
+            index
+            for index, row in enumerate(preview)
+            if required_headers.issubset({normalize_header(value) for value in row})
+        ),
+        None,
+    )
+    if header_index is None:
+        raise ValueError("TOP5源表未找到包含上榜日期、分部名称、客户名称等字段的表头行")
+
+    main_header = preview[header_index]
+
+    def direct_column(labels: tuple[str, ...], required: bool = True) -> int | None:
+        targets = {normalize_header(label) for label in labels}
+        matches = [
+            index
+            for index, value in enumerate(main_header)
+            if normalize_header(value) in targets
+        ]
+        if matches:
+            return matches[0]
+        if required:
+            raise ValueError(f"TOP5源表缺少必要表头：{' / '.join(labels)}")
+        return None
+
+    date_column = direct_column(("上榜日期",))
+    data_index = next(
+        (
+            index
+            for index in range(header_index + 1, len(preview))
+            if date_column < len(preview[index]) and preview[index][date_column] not in (None, "")
+        ),
+        None,
+    )
+    if data_index is None:
+        raise ValueError("TOP5源表表头之后未找到数据行")
+
+    header_rows = preview[header_index:data_index]
+    platform_band = next(
+        (
+            index
+            for index, row in enumerate(header_rows)
+            if any(canonical_top5_platform(value) in {"抖音", "淘宝"} for value in row)
+        ),
+        None,
+    )
+    metric_band = next(
+        (
+            index
+            for index, row in enumerate(header_rows)
+            if index > (platform_band if platform_band is not None else 0)
+            and any(top5_metric_header(value) for value in row)
+        ),
+        None,
+    )
+    measure_band = next(
+        (
+            index
+            for index, row in enumerate(header_rows)
+            if index > (metric_band if metric_band is not None else 0)
+            and any(top5_measure_header(value) for value in row)
+        ),
+        None,
+    )
+    if platform_band is None or metric_band is None:
+        raise ValueError("TOP5源表未找到抖音/淘天平台及24H/36H/48H指标表头")
+
+    platform_by_column = fill_header_band(header_rows[platform_band])
+    metric_by_column = fill_header_band(header_rows[metric_band])
+    measure_by_column = (
+        [top5_measure_header(value) for value in header_rows[measure_band]]
+        if measure_band is not None
+        else []
+    )
+    column_count = max(len(row) for row in header_rows)
+
+    def metric_column(platform: str, metric: str, measure: str | None = None) -> int:
+        candidates = []
+        for column in range(column_count):
+            column_platform = canonical_top5_platform(
+                platform_by_column[column] if column < len(platform_by_column) else ""
+            )
+            column_metric = top5_metric_header(
+                metric_by_column[column] if column < len(metric_by_column) else ""
+            )
+            if column_platform != platform or column_metric != metric:
+                continue
+            column_measure = measure_by_column[column] if column < len(measure_by_column) else ""
+            if measure == "rate" and column_measure != "rate":
+                continue
+            if measure == "value" and column_measure == "rate":
+                continue
+            candidates.append(column)
+        if not candidates:
+            measure_label = f"/{measure}" if measure else ""
+            raise ValueError(f"TOP5源表缺少必要指标：{platform}/{metric}{measure_label}")
+        return candidates[0]
+
+    platform_columns = {
+        platform: {
+            "timeout_24h": metric_column(platform, "24h", "value"),
+            "timeout_36h": metric_column(platform, "36h", "value"),
+            "timeout_rate_36h": metric_column(platform, "36h", "rate"),
+            "timeout_48h": metric_column(platform, "48h", "value"),
+        }
+        for platform in ("抖音", "淘宝")
+    }
+    columns: dict[str, Any] = {
+        "date": date_column,
+        "branch": direct_column(("分部名称",)),
+        "customer": direct_column(("客户名称",)),
+        "customer_code": direct_column(("客户编码",)),
+        "source_platform": direct_column(("平台",)),
+        "ranking_count": direct_column(("上榜次数",)),
+        "has_shipping_fallback": direct_column(("是否有发货兜底", "有发货兜底", "发货兜底"), required=False),
+        "reason": direct_column(("超时原因",), required=False),
+        "action": direct_column(("整改动作",), required=False),
+        "achieved_date": direct_column(("达成日期",), required=False),
+        "platform_columns": platform_columns,
+    }
+    return columns, data_index + 1
+
+
+def merged_reason_action_rows(
+    path: Path,
+    sheet_name: str,
+    target_start_column: int,
+    target_end_column: int,
+) -> set[int]:
     main_namespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     office_relationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     package_relationships = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -182,7 +351,7 @@ def merged_reason_action_rows(path: Path, sheet_name: str) -> set[int]:
             continue
         start_column = excel_column_number(match.group(1))
         end_column = excel_column_number(match.group(3))
-        if start_column > 20 or end_column < 21:
+        if start_column > target_end_column or end_column < target_start_column:
             continue
         merged_rows.update(range(int(match.group(2)), int(match.group(4)) + 1))
     return merged_rows
@@ -299,56 +468,71 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
 
 def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
     path = locate(data_dir, "②")
-    merged_tu_rows = merged_reason_action_rows(path, "TOP客户累计改善清单")
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet = workbook["TOP客户累计改善清单"]
+    field_columns, data_start_row = top5_column_map(sheet)
+    action_column = field_columns.get("action")
+    achieved_date_column = field_columns.get("achieved_date")
+    merged_tu_rows = (
+        merged_reason_action_rows(
+            path,
+            "TOP客户累计改善清单",
+            action_column + 1,
+            achieved_date_column + 1,
+        )
+        if action_column is not None and achieved_date_column is not None
+        else set()
+    )
     records, branch_top5_rows, bad_dates = [], [], 0
-    platform_columns = {
-        "抖音": {"timeout_24h": 11, "timeout_36h": 12, "timeout_rate_36h": 13, "timeout_48h": 14},
-        "淘宝": {"timeout_24h": 15, "timeout_36h": 16, "timeout_rate_36h": 17, "timeout_48h": 18},
-    }
-    for row_number, row in enumerate(sheet.iter_rows(min_row=10, values_only=True), start=10):
-        if not row or row[1] in (None, ""):
+
+    def cell_at(row: tuple[Any, ...], column: int | None) -> Any:
+        return row[column] if isinstance(column, int) and column < len(row) else None
+
+    def cell(row: tuple[Any, ...], name: str) -> Any:
+        return cell_at(row, field_columns.get(name))
+
+    for row_number, row in enumerate(sheet.iter_rows(min_row=data_start_row, values_only=True), start=data_start_row):
+        if not row or cell(row, "date") in (None, ""):
             continue
-        parsed_date = date_text(row[1], workbook.epoch, year)
+        parsed_date = date_text(cell(row, "date"), workbook.epoch, year)
         if not parsed_date:
             bad_dates += 1
             continue
-        source_platform = PLATFORM_ALIAS.get(text(row[9]), text(row[9]))
-        reason = text(row[19])
-        action = text(row[20])
+        source_platform = canonical_top5_platform(cell(row, "source_platform"))
+        reason = text(cell(row, "reason"))
+        action = text(cell(row, "action"))
         base = {
             "date": parsed_date,
-            "branch": text(row[3]),
-            "customer": text(row[5]),
-            "customer_code": text(row[6]),
-            "has_shipping_fallback": text(row[7]),
+            "branch": text(cell(row, "branch")),
+            "customer": text(cell(row, "customer")),
+            "customer_code": text(cell(row, "customer_code")),
+            "has_shipping_fallback": text(cell(row, "has_shipping_fallback")),
             "source_platform": source_platform,
-            "ranking_count": integer(row[10]),
+            "ranking_count": integer(cell(row, "ranking_count")),
         }
-        if source_platform in platform_columns:
-            columns = platform_columns[source_platform]
+        if source_platform in field_columns["platform_columns"]:
+            columns = field_columns["platform_columns"][source_platform]
             branch_top5_rows.append({
                 **base,
                 "source_row": row_number,
                 "platform": source_platform,
-                "timeout_36h": integer(row[columns["timeout_36h"]]),
-                "timeout_rate_36h": percentage_points(row[columns["timeout_rate_36h"]]),
+                "timeout_36h": integer(cell_at(row, columns["timeout_36h"])),
+                "timeout_rate_36h": percentage_points(cell_at(row, columns["timeout_rate_36h"])),
                 "reason": reason,
                 "action": action,
                 "feedback_merged": row_number in merged_tu_rows,
             })
-        for platform, columns in platform_columns.items():
-            timeout_36h = integer(row[columns["timeout_36h"]])
+        for platform, columns in field_columns["platform_columns"].items():
+            timeout_36h = integer(cell_at(row, columns["timeout_36h"]))
             if timeout_36h <= 0:
                 continue
             records.append({
                 **base,
                 "platform": platform,
-                "timeout_24h": integer(row[columns["timeout_24h"]]),
+                "timeout_24h": integer(cell_at(row, columns["timeout_24h"])),
                 "timeout_36h": timeout_36h,
-                "timeout_rate_36h": percentage_points(row[columns["timeout_rate_36h"]]),
-                "timeout_48h": integer(row[columns["timeout_48h"]]),
+                "timeout_rate_36h": percentage_points(cell_at(row, columns["timeout_rate_36h"])),
+                "timeout_48h": integer(cell_at(row, columns["timeout_48h"])),
             })
     workbook.close()
     return records, branch_top5_rows, bad_dates
