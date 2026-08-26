@@ -53,6 +53,9 @@
   const PAGE_SIZE = 10;
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
   const JD_TREND_HOURS = Object.freeze([48, 72, 96]);
+  const DOUYIN_SCORE_SCENES = Object.freeze({ pickup: '物流停滞-揽收端', full: '物流停滞-全链路' });
+  const DOUYIN_AI_MAX_CUSTOMERS = 4;
+  const DOUYIN_FULL_LINK_LAG_DAYS = Object.freeze([1, 2, 3]);
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
@@ -1203,6 +1206,270 @@
       requestAnimationFrame(draw);
     }
   }
+
+  function douyinAiDayLabel(value) {
+    const match = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+    return match ? `${Number(match[1])}月${Number(match[2])}日` : '—';
+  }
+
+  function douyinAiDateDistance(later, earlier) {
+    const laterDay = new Date(`${later}T00:00:00`);
+    const earlierDay = new Date(`${earlier}T00:00:00`);
+    if (Number.isNaN(laterDay.getTime()) || Number.isNaN(earlierDay.getTime())) return null;
+    return Math.round((laterDay.getTime() - earlierDay.getTime()) / 86400000);
+  }
+
+  function douyinAiDateSpan(dates) {
+    const sorted = [...new Set((dates || []).filter(Boolean))].sort();
+    if (!sorted.length) return '—';
+    const groups = [[sorted[0]]];
+    sorted.slice(1).forEach(day => {
+      const current = groups.at(-1);
+      if (douyinAiDateDistance(day, current.at(-1)) === 1) current.push(day);
+      else groups.push([day]);
+    });
+    return groups.map(group => group.length === 1
+      ? douyinAiDayLabel(group[0])
+      : `${douyinAiDayLabel(group[0])}—${douyinAiDayLabel(group.at(-1))}`).join('、');
+  }
+
+  function douyinAiCustomerName(value) {
+    return Array.from(String(value || '未命名客户')).slice(0, 10).join('');
+  }
+
+  function douyinAiFallback(value) {
+    const raw = String(value ?? '').trim();
+    if (raw === '是') return { label: '是', configured: true, known: true };
+    if (raw === '否') return { label: '否', configured: false, known: true };
+    return { label: raw || '未知', configured: false, known: false };
+  }
+
+  function douyinAiScoreSummary(points) {
+    const groups = new Map();
+    (points || []).forEach(point => {
+      const current = groups.get(point.kind) || { dates: [], score: 0 };
+      current.dates.push(point.date);
+      current.score += Number(point.score || 0);
+      groups.set(point.kind, current);
+    });
+    return [...groups.entries()].map(([kind, summary]) => {
+      const scene = kind === 'pickup' ? '揽收端' : '全链路';
+      return `${scene}${douyinAiDateSpan(summary.dates)}（${formatNumber(summary.score)}分）`;
+    }).join('、');
+  }
+
+  function buildDouyinAiAnalysis(branch, customers, range) {
+    const rangeIndex = new Map(range.map((day, index) => [day, index]));
+    const scorePoints = Object.entries(DOUYIN_SCORE_SCENES).flatMap(([kind, scene]) => (
+      data.branch_score_trends?.[branch]?.[scene] || []
+    ).filter(point => rangeIndex.has(point.date) && Number(point.score || 0) > 0).map(point => ({
+      ...point,
+      kind,
+      scene,
+      date: String(point.date),
+      score: Number(point.score || 0)
+    }))).sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
+
+    const customerStats = new Map();
+    customers.forEach((customer, customerIndex) => {
+      const events = (customer.series || []).filter(point => (
+        point.hasSourcePoint !== false
+        && rangeIndex.has(point.date)
+        && Number(point.timeout_36h || 0) > 0
+      )).map(point => ({
+        key: `${customerIndex}|${point.date}`,
+        customerIndex,
+        date: String(point.date),
+        volume: Number(point.timeout_36h || 0),
+        rate: point.timeout_rate_36h === null || point.timeout_rate_36h === undefined || point.timeout_rate_36h === ''
+          ? null
+          : Number(point.timeout_rate_36h)
+      }));
+      if (!events.length) return;
+      customerStats.set(customerIndex, {
+        customerIndex,
+        customer,
+        fallback: douyinAiFallback(customer.has_shipping_fallback),
+        events,
+        definiteScorePoints: [],
+        possibleScorePoints: [],
+        definiteEventKeys: new Set(),
+        possibleEventKeys: new Set()
+      });
+    });
+
+    const events = [...customerStats.values()].flatMap(stat => stat.events);
+    const unlinked = { pickup: [], full: [] };
+    const ambiguous = { pickup: [], full: [] };
+    scorePoints.forEach(point => {
+      const scoreIndex = rangeIndex.get(point.date);
+      const candidates = events.filter(event => {
+        const eventIndex = rangeIndex.get(event.date);
+        const lag = scoreIndex - eventIndex;
+        return point.kind === 'pickup' ? lag === 0 : DOUYIN_FULL_LINK_LAG_DAYS.includes(lag);
+      });
+      const candidateStats = [...new Set(candidates.map(event => event.customerIndex))]
+        .map(customerIndex => customerStats.get(customerIndex))
+        .filter(Boolean);
+      if (candidateStats.length === 1) {
+        const stat = candidateStats[0];
+        stat.definiteScorePoints.push(point);
+        candidates.filter(event => event.customerIndex === stat.customerIndex).forEach(event => stat.definiteEventKeys.add(event.key));
+      } else if (candidateStats.length > 1) {
+        candidateStats.forEach(stat => {
+          stat.possibleScorePoints.push(point);
+          candidates.filter(event => event.customerIndex === stat.customerIndex).forEach(event => stat.possibleEventKeys.add(event.key));
+        });
+        ambiguous[point.kind].push(point);
+      } else {
+        unlinked[point.kind].push(point);
+      }
+    });
+
+    const ignoredPickupScoreKeys = new Set(unlinked.pickup.map(point => `${point.kind}|${point.date}`));
+    const analysisScorePoints = scorePoints.filter(point => !ignoredPickupScoreKeys.has(`${point.kind}|${point.date}`));
+
+    const stats = [...customerStats.values()].map(stat => {
+      const eventDates = stat.events.map(event => event.date);
+      const definiteScorePoints = stat.definiteScorePoints;
+      const possibleScorePoints = stat.possibleScorePoints;
+      return {
+        ...stat,
+        eventDates: [...new Set(eventDates)].sort(),
+        timeoutVolume: stat.events.reduce((sum, event) => sum + event.volume, 0),
+        peakTimeoutVolume: Math.max(...stat.events.map(event => event.volume)),
+        maxRate: Math.max(...stat.events.map(event => Number.isFinite(event.rate) ? event.rate : 0)),
+        definiteScorePoints,
+        possibleScorePoints,
+        definiteScoreTotal: definiteScorePoints.reduce((sum, point) => sum + point.score, 0),
+        possibleScoreTotal: possibleScorePoints.reduce((sum, point) => sum + point.score, 0),
+        hasFullEvidence: [...definiteScorePoints, ...possibleScorePoints].some(point => point.kind === 'full')
+      };
+    }).sort((a, b) => b.definiteScoreTotal - a.definiteScoreTotal
+      || b.possibleScoreTotal - a.possibleScoreTotal
+      || b.timeoutVolume - a.timeoutVolume
+      || b.peakTimeoutVolume - a.peakTimeoutVolume
+      || a.customer.customer.localeCompare(b.customer.customer, 'zh-CN'));
+
+    const sceneSummary = Object.entries(DOUYIN_SCORE_SCENES).map(([kind, scene]) => {
+      const points = analysisScorePoints.filter(point => point.kind === kind);
+      return {
+        kind,
+        scene,
+        points,
+        score: points.reduce((sum, point) => sum + point.score, 0),
+        dates: [...new Set(points.map(point => point.date))].sort()
+      };
+    });
+    const totalScore = analysisScorePoints.reduce((sum, point) => sum + point.score, 0);
+    const timeoutVolume = events.reduce((sum, event) => sum + event.volume, 0);
+    const scoreDates = [...new Set(analysisScorePoints.map(point => point.date))].sort();
+    return {
+      range,
+      scorePoints: analysisScorePoints,
+      sceneSummary,
+      scoreDates,
+      totalScore,
+      events,
+      timeoutVolume,
+      customerCount: customerStats.size,
+      customers: stats,
+      attentionCustomers: stats.slice(0, DOUYIN_AI_MAX_CUSTOMERS),
+      unlinked,
+      ambiguous,
+      hasData: Boolean(analysisScorePoints.length || events.length)
+    };
+  }
+
+  function douyinAiRecommendationForCustomer(stat) {
+    const name = `“${douyinAiCustomerName(stat.customer.customer)}”`;
+    if (!stat.fallback.known) {
+      return stat.hasFullEvidence
+        ? `${name}发运兜底状态未知且与全链路扣分时段重合：先确认并补齐发运兜底；无货不揽收，交不出来的做始发退回/换单发出；更换发货窗口。`
+        : `${name}发运兜底状态未知且存在36H发运超时：先确认是否配置发运兜底，必要时申请配置；同时更换发货窗口。`;
+    }
+    if (!stat.fallback.configured && stat.hasFullEvidence) {
+      return `${name}未配置发运兜底，且与全链路扣分时段重合：申请配置发运兜底；无货不揽收，交不出来的做始发退回/换单发出；更换发货窗口。`;
+    }
+    if (!stat.fallback.configured) {
+      return `${name}未配置发运兜底且存在36H发运超时：申请配置发运兜底；同时更换发货窗口。`;
+    }
+    if (stat.hasFullEvidence) {
+      return `${name}已配置发运兜底但仍与全链路扣分时段重合：无货不揽收，交不出来的做始发退回/换单发出；同时更换发货窗口。`;
+    }
+    return `${name}已配置发运兜底但仍有36H发运超时：执行无货不揽收，并优化发货窗口。`;
+  }
+
+  function douyinAiHeadline(analysis) {
+    const linkedIssueCount = analysis.unlinked.full.length + analysis.ambiguous.full.length;
+    if (analysis.totalScore > 0) {
+      const sceneText = analysis.sceneSummary.filter(summary => summary.score > 0)
+        .map(summary => `${summary.kind === 'pickup' ? '揽收端' : '全链路'}${formatNumber(summary.score)}分`).join('、');
+      return linkedIssueCount
+        ? `近15天共${analysis.scoreDates.length}天扣分${formatNumber(analysis.totalScore)}分（${sceneText}），其中部分全链路扣分暂无法唯一归因。`
+        : `近15天共${analysis.scoreDates.length}天扣分${formatNumber(analysis.totalScore)}分（${sceneText}），已结合客户36H发运超时趋势生成跟进建议。`;
+    }
+    if (analysis.events.length) return `近期暂无对应扣分，但全部客户趋势存在${formatNumber(analysis.timeoutVolume)}票36H发运超时，建议提前处置。`;
+    return '近期暂无扣分及客户36H发运超时数据，暂不生成跟进建议。';
+  }
+
+  function douyinAiScoreCard(summary) {
+    return `<div><span>${summary.kind === 'pickup' ? '揽收端扣分' : '全链路扣分'}</span><strong>${formatNumber(summary.score)}分</strong><small>${summary.dates.length ? douyinAiDateSpan(summary.dates) : '近期无记录'}</small></div>`;
+  }
+
+  function hideDouyinAiAnalysis() {
+    const panel = $('#douyinAiAnalysis');
+    if (!panel) return;
+    panel.hidden = true;
+    panel.innerHTML = '';
+  }
+
+  function renderDouyinAiAnalysis(branch, customers, range) {
+    const panel = $('#douyinAiAnalysis');
+    if (!panel) return;
+    if (state.platform !== '抖音') {
+      hideDouyinAiAnalysis();
+      return;
+    }
+    const analysis = buildDouyinAiAnalysis(branch, customers, range);
+    panel.hidden = false;
+    if (!analysis.hasData) {
+      panel.innerHTML = `<div class="drawer-ai-head"><div><span class="drawer-ai-kicker">AI FOLLOW-UP</span><h3>AI分析建议</h3><p>${escapeHtml(branch)} · ${escapeHtml(range[0] || '—')} — ${escapeHtml(range.at(-1) || '—')}</p></div><span class="drawer-ai-status neutral">暂无数据</span></div><div class="drawer-ai-empty">${escapeHtml(douyinAiHeadline(analysis))}</div>`;
+      return;
+    }
+
+    const statusClass = analysis.totalScore >= 6 || analysis.sceneSummary.some(summary => summary.kind === 'full' && summary.score > 0)
+      ? 'risk'
+      : 'attention';
+    const statusCopy = statusClass === 'risk' ? '重点跟进' : '需要关注';
+    const fullLinkIssueCount = analysis.unlinked.full.length + analysis.ambiguous.full.length;
+    const customerRows = analysis.attentionCustomers.length
+      ? analysis.attentionCustomers.map(stat => {
+        const definite = stat.definiteScorePoints.length ? `对应扣分：${douyinAiScoreSummary(stat.definiteScorePoints)}` : '';
+        const possible = stat.possibleScorePoints.length ? `与${douyinAiScoreSummary(stat.possibleScorePoints)}时间重合，暂无法唯一归因` : '';
+        const scoreText = definite || possible || '当前客户超时趋势暂未对应到扣分记录';
+        const rateText = Number.isFinite(stat.maxRate) && stat.maxRate > 0 ? ` · 最高${formatRate(stat.maxRate)}` : '';
+        return `<li><div class="drawer-ai-customer-head"><strong title="${escapeHtml(douyinAiCustomerName(stat.customer.customer))}">${escapeHtml(douyinAiCustomerName(stat.customer.customer))}</strong><span class="drawer-ai-fallback ${stat.fallback.configured ? 'yes' : ''}">发运兜底 · ${escapeHtml(stat.fallback.label)}</span></div><p>${escapeHtml(douyinAiDateSpan(stat.eventDates))} · 36H超时 ${escapeHtml(formatNumber(stat.timeoutVolume))}票${rateText}</p><small>${escapeHtml(scoreText)}</small></li>`;
+      }).join('')
+      : '<li class="drawer-ai-list-empty">近期没有可关联的客户36H超时记录。</li>';
+    const customerRecommendations = analysis.attentionCustomers.map(douyinAiRecommendationForCustomer);
+    const recommendations = [...customerRecommendations];
+    if (fullLinkIssueCount) {
+      recommendations.push(`有${fullLinkIssueCount}个全链路扣分日无法唯一对应客户，可能是中转或末端原因造成，建议核查发运记录、中转节点及末端签收。`);
+    }
+    if (analysis.attentionCustomers.length > 1 && analysis.sceneSummary.some(summary => summary.kind === 'pickup' && summary.score > 0)) {
+      recommendations.push('多个客户同时出现发运超时，执行多窗口分流，避免客户集中在同一发货窗口。');
+    }
+    if (!recommendations.length) {
+      recommendations.push('当前扣分趋势暂未匹配到客户趋势，先核查发运记录及对应的中转、末端节点。');
+    }
+    const ruleNotes = [
+      '揽收端按36H发运超时判断；配置发运兜底后，实际36H超时通常不会直接形成揽收端扣分。',
+      '全链路按超长单判断；客户无法唯一对应时，优先排查中转或末端环节。'
+    ];
+    panel.innerHTML = `<div class="drawer-ai-head"><div><span class="drawer-ai-kicker">AI FOLLOW-UP</span><h3>AI分析建议</h3><p>${escapeHtml(branch)} · ${escapeHtml(range[0] || '—')} — ${escapeHtml(range.at(-1) || '—')} · 基于近期扣分与全部客户趋势</p></div><span class="drawer-ai-status ${statusClass}">${statusCopy}</span></div><p class="drawer-ai-conclusion">${escapeHtml(douyinAiHeadline(analysis))}</p><div class="drawer-ai-metrics"><div><span>扣分天数</span><strong>${formatNumber(analysis.scoreDates.length)}天</strong><small>近期15天</small></div>${analysis.sceneSummary.map(douyinAiScoreCard).join('')}<div><span>客户36H超时量</span><strong>${formatNumber(analysis.timeoutVolume)}</strong><small>${analysis.customerCount}个客户</small></div></div><div class="drawer-ai-block"><h4>主要影响客户（取影响最大的前4个）</h4><ol class="drawer-ai-customer-list">${customerRows}</ol></div><div class="drawer-ai-block drawer-ai-recommendations"><h4>跟进建议</h4><ul>${recommendations.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div><div class="drawer-ai-block drawer-ai-rules"><h4>分析依据</h4><ul>${ruleNotes.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></div>`;
+  }
+
   function renderJdBranchAnalysis(branch, customers, range) {
     const panel = $('#drawerScoreTrend');
     if (!panel) return;
@@ -1414,6 +1681,7 @@
     $('#drawerHistory').innerHTML = '';
     $('#drawerCharts').hidden = true;
     $('#drawerCharts').innerHTML = '';
+    hideDouyinAiAnalysis();
     clearJdCustomerPeriodAnalysis();
     chartJobs = [];
     renderDeliveryScoreTrend(branch, range);
@@ -1432,6 +1700,7 @@
     $('#drawerHistory').innerHTML = '';
     $('#drawerCharts').hidden = false;
     $('#drawerCharts').innerHTML = '<div class="drawer-empty">' + escapeHtml(message || '正在加载趋势数据') + '</div>';
+    hideDouyinAiAnalysis();
     clearJdCustomerPeriodAnalysis();
     chartJobs = [];
     const layer = $('#drawerLayer');
@@ -1528,8 +1797,12 @@
     $('#drawerCharts').hidden = false;
     chartJobs = [];
     if (jd) renderJdBranchAnalysis(branch, customers, range);
-    else if (state.platform === '\u6296\u97f3') renderBranchScoreTrend(branch, range);
+    else if (state.platform === '\u6296\u97f3') {
+      renderBranchScoreTrend(branch, range);
+      renderDouyinAiAnalysis(branch, customers, range);
+    }
     else {
+      hideDouyinAiAnalysis();
       const scorePanel = $('#drawerScoreTrend');
       if (scorePanel) {
         scorePanel.hidden = true;
@@ -1552,6 +1825,7 @@
     layer.classList.remove('open');
     layer.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
+    hideDouyinAiAnalysis();
     clearJdCustomerPeriodAnalysis();
     chartJobs = [];
   }
