@@ -51,6 +51,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const PAGE_SIZE = 10;
+  const EMPTY_PROVINCE_VALUE = '__empty__';
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
   const JD_TREND_HOURS = Object.freeze([48, 72, 96]);
   const DOUYIN_SCORE_SCENES = Object.freeze({ pickup: '物流停滞-揽收端', full: '物流停滞-全链路' });
@@ -59,7 +60,7 @@
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', platformQuery: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
   let jdPeriodContext = null;
@@ -125,6 +126,7 @@
       ? platform.top60_by_date?.[state.date] || top10Rows()
       : top10Rows();
   }
+  function filteredTopRows() { return topRows().filter(row => provinceMatches(row, state.branchProvince)); }
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
   function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
   function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
@@ -136,19 +138,36 @@
   function deliveryMonitor() { return data.delivery_monitor || {}; }
   function currentDeliveryControls() { return deliveryMonitor().controls_by_date?.[state.date] || []; }
   function currentDeliveryHighScores() { return deliveryMonitor().high_scores_by_date?.[state.date] || []; }
-  function filterDeliveryRows(rows) {
-    const query = String(state.deliveryQuery || '').trim().toLocaleLowerCase('zh-CN');
-    if (!query) return rows;
-    return rows.filter(row => Object.values(row).map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(query));
+  function provinceKey(value) {
+    const normalized = String(value ?? '').trim();
+    return normalized || EMPTY_PROVINCE_VALUE;
   }
-  function filteredDeliveryControls() { return filterDeliveryRows(currentDeliveryControls()); }
-  function filteredDeliveryHighScores() { return filterDeliveryRows(currentDeliveryHighScores()); }
-  function filterPlatformRows(rows) {
-    const query = String(state.platformQuery || '').trim().toLocaleLowerCase('zh-CN');
-    if (!query) return rows;
-    return rows.filter(row => [
+  function provinceLabel(value) { return value === EMPTY_PROVINCE_VALUE ? '—' : value; }
+  function provinceMatches(row, selected) { return !selected || provinceKey(row?.province) === selected; }
+  function renderProvinceFilter(selector, rows, selected) {
+    const select = $(selector);
+    if (!select) return '';
+    const counts = new Map();
+    (rows || []).forEach(row => {
+      const key = provinceKey(row?.province);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const available = selected && counts.has(selected) ? selected : '';
+    const options = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || provinceLabel(a[0]).localeCompare(provinceLabel(b[0]), 'zh-CN'))
+      .map(([key]) => `<option value="${escapeHtml(key)}">${escapeHtml(provinceLabel(key))}</option>`)
+      .join('');
+    select.innerHTML = `<option value="">省区筛选器</option>${options}`;
+    select.value = available;
+    return available;
+  }
+  function platformRowMatchesQuery(row, query = state.platformQuery) {
+    const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
+    if (!normalized) return true;
+    return [
       row.date,
       row.branch,
+      row.province,
       row.parent_name,
       row.control_action,
       row.control_status,
@@ -167,7 +186,26 @@
       row.clearout_count,
       row.last_clearout_date,
       row.last_clearout_type
-    ].map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(query));
+    ].map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(normalized);
+  }
+  function platformProvinceRows() {
+    return [...currentScores(), ...currentControls(), ...currentExtremeRecords()].filter(row => platformRowMatchesQuery(row));
+  }
+  function deliveryRowMatchesQuery(row, query = state.deliveryQuery) {
+    const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
+    if (!normalized) return true;
+    return Object.values(row).map(value => String(value ?? '')).join(' ').toLocaleLowerCase('zh-CN').includes(normalized);
+  }
+  function deliveryProvinceRows() {
+    return [...currentDeliveryControls(), ...currentDeliveryHighScores()].filter(row => deliveryRowMatchesQuery(row));
+  }
+  function filterDeliveryRows(rows) {
+    return rows.filter(row => provinceMatches(row, state.deliveryProvince) && deliveryRowMatchesQuery(row));
+  }
+  function filteredDeliveryControls() { return filterDeliveryRows(currentDeliveryControls()); }
+  function filteredDeliveryHighScores() { return filterDeliveryRows(currentDeliveryHighScores()); }
+  function filterPlatformRows(rows) {
+    return rows.filter(row => provinceMatches(row, state.platformProvince) && platformRowMatchesQuery(row));
   }
   function filteredControls() { return filterPlatformRows(currentControls()); }
   function filteredScores() { return filterPlatformRows(currentScores()); }
@@ -226,9 +264,16 @@
     return `<span class="rank ${kind}">${rank}</span>`;
   }
 
-  function branchButton(branch, parent, mode = "pickup") {
+  function provinceCell(value) {
+    const raw = value === null || value === undefined ? '' : String(value).trim();
+    const label = raw || '—';
+    return `<span class="province-label" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  }
+
+  function branchButton(branch, parent, mode = "pickup", showParent = true) {
     const drawerMode = mode === "delivery" ? ` data-drawer-mode="delivery"` : "";
-    return `<button class="branch-button js-branch" type="button" data-branch="${encodeName(branch)}"${drawerMode}>${escapeHtml(branch)}</button><span class="subline" title="${escapeHtml(parent || branch)}">一级公司 · ${escapeHtml(parent || branch)}</span>`;
+    const parentLine = showParent ? `<span class="subline" title="${escapeHtml(parent || branch)}">一级公司 · ${escapeHtml(parent || branch)}</span>` : '';
+    return `<button class="branch-button js-branch" type="button" data-branch="${encodeName(branch)}"${drawerMode}>${escapeHtml(branch)}</button>${parentLine}`;
   }
 
   function historyStack(history, maxItems = 6) {
@@ -414,7 +459,10 @@
       if (!button || button.dataset.platform === state.platform) return;
       state.platform = button.dataset.platform;
       state.platformQuery = '';
+      state.platformProvince = '';
+      state.branchProvince = '';
       state.deliveryQuery = '';
+      state.deliveryProvince = '';
       $$('.segment', $('#platformSwitcher')).forEach(item => {
         const active = item === button;
         item.classList.toggle('active', active);
@@ -448,6 +496,9 @@
       state.controlPage = 1;
       state.scorePage = 1;
       state.extremePage = 1;
+      state.platformProvince = '';
+      state.branchProvince = '';
+      state.deliveryProvince = '';
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
       state.topPage = 1;
@@ -458,6 +509,16 @@
 
     $('#platformSearch').addEventListener('input', event => {
       state.platformQuery = event.target.value;
+      state.controlPage = 1;
+      state.scorePage = 1;
+      state.extremePage = 1;
+      renderPlatformSearch();
+      renderControls();
+      renderScores();
+      renderExtremeRecords();
+    });
+    $('#platformProvinceFilter')?.addEventListener('change', event => {
+      state.platformProvince = event.target.value;
       state.controlPage = 1;
       state.scorePage = 1;
       state.extremePage = 1;
@@ -500,6 +561,14 @@
       renderDeliveryControls();
       renderDeliveryHighScores();
     });
+    $('#deliveryProvinceFilter')?.addEventListener('change', event => {
+      state.deliveryProvince = event.target.value;
+      state.deliveryControlPage = 1;
+      state.deliveryHighScorePage = 1;
+      renderDeliverySearch();
+      renderDeliveryControls();
+      renderDeliveryHighScores();
+    });
     $('#deliverySearch').addEventListener('keydown', event => {
       if (event.key === 'Escape' && state.deliveryQuery) {
         event.stopPropagation();
@@ -535,6 +604,12 @@
         console.error(error);
         setText('#branchSearchHint', '网点趋势加载失败，请重试');
       }
+    });
+    $('#branchProvinceFilter')?.addEventListener('change', event => {
+      state.branchProvince = event.target.value;
+      state.topPage = 1;
+      renderBranchSearch();
+      renderTop10();
     });
     $('#branchSearch').addEventListener('keydown', event => {
       if (event.key === 'Enter') {
@@ -651,6 +726,9 @@
     state.controlPage = 1;
     state.scorePage = 1;
     state.extremePage = 1;
+    state.platformProvince = '';
+    state.branchProvince = '';
+    state.deliveryProvince = '';
     state.topPage = 1;
     state.jdControlPage = 1;
     updateDateButtons();
@@ -722,17 +800,24 @@
     }
   }
 
+  function branchSearchSourceEntries(query) {
+    const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
+    const source = data.trends?.[state.platform] || {};
+    return Object.entries(source).filter(([branch, branchData]) => {
+      const customers = (branchData?.customers || []).map(item => `${item.customer || ''} ${item.customer_code || ''}`).join(' ');
+      const haystack = `${branch} ${branchData?.parent_name || ''} ${customers}`.toLocaleLowerCase('zh-CN');
+      return !normalized || haystack.includes(normalized);
+    });
+  }
+  function branchProvinceRows() {
+    return topRows().map(row => ({ province: row.province || '' }));
+  }
   function branchSearchRows(query) {
     const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
     if (!normalized) return { total: 0, rows: [] };
     const range = new Set(dayRange(state.date, 15));
     const timeoutField = state.platform === '京东' ? 'timeout_48h' : 'timeout_36h';
-    const source = data.trends?.[state.platform] || {};
-    const rows = Object.entries(source).filter(([branch, branchData]) => {
-      const customers = (branchData?.customers || []).map(item => `${item.customer || ''} ${item.customer_code || ''}`).join(' ');
-      const haystack = `${branch} ${branchData?.parent_name || ''} ${customers}`.toLocaleLowerCase('zh-CN');
-      return haystack.includes(normalized);
-    }).map(([branch, branchData]) => {
+    const rows = branchSearchSourceEntries(query).filter(([, branchData]) => provinceMatches(branchData, state.branchProvince)).map(([branch, branchData]) => {
       const activeCustomers = (branchData.customers || []).map(customer => {
         const points = (customer.series || []).filter(point => range.has(point.date));
         return { customer, points };
@@ -742,7 +827,7 @@
       const lastActiveDate = activeCustomers.flatMap(item => item.points.map(point => point.date)).sort().at(-1) || '';
       const lowerBranch = branch.toLocaleLowerCase('zh-CN');
       return {
-        branch,
+        branch, province: branchData.province || '',
         parent: branchData.parent_name || branch,
         customerCount: activeCustomers.length,
         weekTotal,
@@ -761,7 +846,11 @@
     const results = $('#branchSearchResults');
     const query = String(state.branchQuery || '').trim();
     const branchReady = drawerDataReady(state.platform);
-    const branchCount = Object.keys(data.trends?.[state.platform] || {}).length;
+    const optionRows = branchProvinceRows();
+    state.branchProvince = renderProvinceFilter('#branchProvinceFilter', optionRows, state.branchProvince);
+    const branchCount = branchReady
+      ? Object.values(data.trends?.[state.platform] || {}).filter(branchData => provinceMatches(branchData, state.branchProvince)).length
+      : new Set(filteredTopRows().map(row => row.branch)).size;
     if (input.value !== state.branchQuery) input.value = state.branchQuery;
     clear.hidden = !state.branchQuery;
     if (!branchReady) {
@@ -791,7 +880,7 @@
       </button>`).join('')}</div>`;
   }
   function renderTop10() {
-    const rows = topRows();
+    const rows = filteredTopRows();
     const douyin = state.platform === '抖音';
     const jd = state.platform === '京东';
     const paginated = douyin || jd;
@@ -803,21 +892,21 @@
     table.classList.toggle('douyin-columns', douyin);
     table.classList.toggle('jd-columns', jd);
     $('#top10Head').innerHTML = douyin
-      ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
+      ? '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
       : jd
-        ? '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>48H量</th><th>48H率</th><th>72H量</th><th>72H率</th><th>96H量</th><th>96H率</th><th>上榜次数</th><th>发运兜底</th></tr>'
-        : '<tr><th>排名</th><th>分部 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
+        ? '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>48H量</th><th>48H率</th><th>72H量</th><th>72H率</th><th>96H量</th><th>96H率</th><th>上榜次数</th><th>发运兜底</th></tr>'
+        : '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
 
     const pages = paginated ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
     state.topPage = Math.min(state.topPage, pages);
     const pageRows = paginated ? rows.slice((state.topPage - 1) * pageSize, state.topPage * pageSize) : rows;
     if (!rows.length) {
       const emptyCopy = datesForPlatform().length ? '该日期暂无交件预警数据' : `${state.platform}暂未提供交件源文件`;
-      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 12 : jd ? 13 : 9}">${escapeHtml(emptyCopy)}</td></tr>`;
+      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="${douyin ? 13 : jd ? 14 : 10}">${escapeHtml(emptyCopy)}</td></tr>`;
     } else {
       $('#top10Body').innerHTML = pageRows.map(row => {
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
-        const identity = `<td>${rankBadge(row.rank)}</td><td>${branchButton(row.branch, row.parent_name)}</td><td>${customer}</td>`;
+        const identity = `<td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.province)}</td><td>${branchButton(row.branch, row.parent_name, 'pickup', false)}</td><td>${customer}</td>`;
         if (jd) {
           return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 48))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_72h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 72))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_96h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 96))}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
         }
@@ -951,11 +1040,15 @@
     const query = String(state.platformQuery || '').trim();
     if (input.value !== state.platformQuery) input.value = state.platformQuery;
     clear.hidden = !state.platformQuery;
+    state.platformProvince = renderProvinceFilter('#platformProvinceFilter', platformProvinceRows(), state.platformProvince);
+    const scoreRows = filteredScores();
+    const controlRows = filteredControls();
+    const extremeRows = filteredExtremeRecords();
     if (!query) {
-      setText('#platformSearchHint', currentScores().length + ' 个高积分网点 · ' + currentControls().length + ' 条管控记录 · ' + currentExtremeRecords().length + ' 条极差熔断');
+      setText('#platformSearchHint', scoreRows.length + ' 个高积分网点 · ' + controlRows.length + ' 条管控记录 · ' + extremeRows.length + ' 条极差熔断');
       return;
     }
-    setText('#platformSearchHint', '找到 ' + filteredScores().length + ' 个高积分网点 · ' + filteredControls().length + ' 条管控记录 · ' + filteredExtremeRecords().length + ' 条极差熔断');
+    setText('#platformSearchHint', '找到 ' + scoreRows.length + ' 个高积分网点 · ' + controlRows.length + ' 条管控记录 · ' + extremeRows.length + ' 条极差熔断');
   }
   function renderControls() {
     const rows = filteredControls();
@@ -965,12 +1058,13 @@
     setText('#controlCount', `${rows.length} 条`);
     $('#controlBody').innerHTML = pageRows.length ? pageRows.map(row => `<tr>
       <td>${shortDate(row.date)}</td>
-      <td>${branchButton(row.branch, row.parent_name)}</td>
+      <td class="province-cell">${provinceCell(row.province)}</td>
+      <td>${branchButton(row.branch, row.parent_name, 'pickup', false)}</td>
       <td>${actionPill(row.control_action)}<span class="subline">${escapeHtml(row.control_status || '—')}</span></td>
       <td>${scoreChip(row.stagnant_score)}</td>
       <td>${formatNumber(row.clearout_count)}次</td>
       <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
-    </tr>`).join('') : `<tr class="empty-row"><td colspan="6">${state.platformQuery ? '没有匹配当前关键词的管控记录' : '最近 7 天暂无网点维度管控记录'}</td></tr>`;
+    </tr>`).join('') : `<tr class="empty-row"><td colspan="7">${state.platformQuery ? '没有匹配当前关键词的管控记录' : '最近 7 天暂无网点维度管控记录'}</td></tr>`;
     renderPagination($('#controlPagination'), state.controlPage, pages, rows.length, 'control');
   }
 
@@ -983,6 +1077,7 @@
     $('#scoreBody').innerHTML = pageRows.length ? pageRows.map(row => {
       const width = Math.min(100, Number(row.stagnant_score || 0) / 12 * 100);
       return `<tr>
+        <td class="province-cell">${provinceCell(row.province)}</td>
         <td>${branchButton(row.branch, row.parent_name)}</td>
         <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${row.is_new ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
         <td>${deductionLevelChip(row)}</td>
@@ -992,7 +1087,7 @@
         <td>${formatNumber(row.clearout_count)}次</td>
         <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="8">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="9">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
   }
 
@@ -1004,11 +1099,12 @@
     setText('#extremeCount', rows.length + ' 条');
     $('#extremeBody').innerHTML = pageRows.length ? pageRows.map(row => '<tr>' +
       '<td>' + shortDate(row.date) + '</td>' +
-      '<td>' + branchButton(row.branch, row.parent_name) + '</td>' +
+      '<td class="province-cell">' + provinceCell(row.province) + '</td>' +
+      '<td>' + branchButton(row.branch, row.parent_name, 'pickup', false) + '</td>' +
       '<td>' + feedbackResultChip(row.feedback_result) + '</td>' +
       '<td>' + formatOptionalNumber(row.timeout_count) + '</td>' +
       '<td><span class="rate">' + formatOptionalRate(row.timeout_rate) + '</span></td>' +
-    '</tr>').join('') : '<tr class="empty-row"><td colspan="5">' + (state.platformQuery ? '最近 20 条中没有匹配当前关键词的极差熔断记录' : '近一个月暂无极端异常记录') + '</td></tr>';
+    '</tr>').join('') : '<tr class="empty-row"><td colspan="6">' + (state.platformQuery ? '最近 20 条中没有匹配当前关键词的极差熔断记录' : '近一个月暂无极端异常记录') + '</td></tr>';
     renderPagination($('#extremePagination'), state.extremePage, pages, rows.length, 'extreme');
   }
 
@@ -1042,11 +1138,14 @@
     const query = String(state.deliveryQuery || '').trim();
     if (input.value !== state.deliveryQuery) input.value = state.deliveryQuery;
     clear.hidden = !state.deliveryQuery;
+    state.deliveryProvince = renderProvinceFilter('#deliveryProvinceFilter', deliveryProvinceRows(), state.deliveryProvince);
+    const controlRows = filteredDeliveryControls();
+    const scoreRows = filteredDeliveryHighScores();
     if (!query) {
-      setText('#deliverySearchHint', `积分更新至 ${shortDate(deliveryMonitor().as_of)} · ${currentDeliveryControls().length} 条管控 · ${currentDeliveryHighScores().length} 个高积分网点`);
+      setText('#deliverySearchHint', `积分更新至 ${shortDate(deliveryMonitor().as_of)} · ${controlRows.length} 条管控 · ${scoreRows.length} 个高积分网点`);
       return;
     }
-    setText('#deliverySearchHint', `找到 ${filteredDeliveryControls().length} 条管控 · ${filteredDeliveryHighScores().length} 个高积分网点`);
+    setText('#deliverySearchHint', `找到 ${controlRows.length} 条管控 · ${scoreRows.length} 个高积分网点`);
   }
 
   function renderDeliveryControls() {

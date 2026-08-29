@@ -679,6 +679,10 @@ def parent_of(branch: str, mapping: dict[str, dict[str, str]]) -> str:
     return mapping.get(branch, {}).get("parent_name") or branch
 
 
+def province_of(branch: str, mapping: dict[str, dict[str, str]]) -> str:
+    return mapping.get(branch, {}).get("province") or ""
+
+
 def build_shortage_history(top5: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) -> dict[str, dict[str, Any]]:
     work: dict[tuple[str, str], dict[str, Any]] = defaultdict(lambda: {"months": defaultdict(set), "branches": set(), "customers": set()})
     for row in top5:
@@ -835,6 +839,7 @@ def build_extreme_records(score_rows: list[dict[str, Any]], mapping: dict[str, d
         records.append({
             "date": row.get("date", ""),
             "branch": branch,
+            "province": province_of(branch, mapping),
             "parent_name": parent_of(branch, mapping),
             "scene": row.get("scene", ""),
             "abnormal_level": row.get("abnormal_level", ""),
@@ -866,7 +871,7 @@ def build_delivery_monitor(controls, score_rows, daily_scores, cumulative_scores
                 continue
             page.append({
                 "control_id": row["control_id"], "date": row["start_date"], "branch_code": row["branch_code"],
-                "branch": row["branch"], "parent_name": parent_of(row["branch"], mapping), "region": row["region"],
+                "branch": row["branch"], "province": province_of(row["branch"], mapping), "parent_name": parent_of(row["branch"], mapping), "region": row["region"],
                 "violation_scene": row["violation_scene"], "control_status": row["control_status"],
                 "control_action": row["control_action"], "rolling_score": rolling_score(row["branch"], day), "end_date": row["end_date"],
                 "control_mechanism": row["control_mechanism"], "control_category": row["control_category"],
@@ -884,7 +889,7 @@ def build_delivery_monitor(controls, score_rows, daily_scores, cumulative_scores
             latest_rows = [row for row in score_rows if row["branch"] == branch and row["date"] == latest_date and row["scene"] in DELIVERY_SCORE_SCENES]
             latest_row = max(latest_rows, key=lambda row: (row["current_score"], row["cumulative_score"])) if latest_rows else {}
             high.append({
-                "branch": branch, "branch_code": latest_row.get("branch_code", ""), "parent_name": parent_of(branch, mapping),
+                "branch": branch, "branch_code": latest_row.get("branch_code", ""), "province": province_of(branch, mapping), "parent_name": parent_of(branch, mapping),
                 "stagnant_score": score, "latest_daily_score": daily_scores[branch].get(latest_date, 0),
                 "latest_score_date": latest_date, "latest_abnormal_level": latest_row.get("abnormal_level", ""),
                 "latest_cumulative_score": cumulative_scores.get(branch, {}).get(latest_date, 0),
@@ -896,7 +901,7 @@ def build_delivery_monitor(controls, score_rows, daily_scores, cumulative_scores
     trends = {}
     for branch, days in daily_scores.items():
         trends[branch] = {
-            "parent_name": parent_of(branch, mapping),
+            "province": province_of(branch, mapping), "parent_name": parent_of(branch, mapping),
             "series": [{"date": day, "daily_score": round(days.get(day, 0), 2), "rolling_score": rolling_score(branch, day)} for day in score_dates],
         }
     return {
@@ -935,7 +940,7 @@ def build_trends(timeout_rows: list[dict[str, Any]], mapping: dict[str, dict[str
             for item in items:
                 item["series"].sort(key=lambda row: row["date"])
             items.sort(key=lambda item: (-item["total_36h"], item["customer"]))
-            result[platform][branch] = {"parent_name": parent_of(branch, mapping), "customers": items}
+            result[platform][branch] = {"province": province_of(branch, mapping), "parent_name": parent_of(branch, mapping), "customers": items}
     return result
 
 
@@ -1029,7 +1034,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 history_shortage = shortage.get(platform, {}).get(parent)
                 if history_shortage is None and platform not in ("抖音", "淘宝"):
                     history_shortage = shortage_all.get(parent)
-                enriched.append({**row, "rank": rank, "parent_name": parent,
+                enriched.append({**row, "rank": rank, "province": province_of(branch, mapping), "parent_name": parent,
                     "stagnant_score": rolling_score(branch, day) if platform == "抖音" else None,
                     "current_control": ctrl["action"] if platform == "抖音" else "",
                     "merchant_control_count": merchant_counts.get(branch, 0) if platform == "抖音" else None,
@@ -1061,7 +1066,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 continue
             parent = parent_of(row["branch"], mapping)
             clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
-            page.append({"date": row["start_date"], "branch": row["branch"], "parent_name": parent,
+            page.append({"date": row["start_date"], "branch": row["branch"], "province": province_of(row["branch"], mapping), "parent_name": parent,
                 "control_action": row["control_action"], "control_status": row["control_status"],
                 "stagnant_score": rolling_score(row["branch"], day), "clearout_count": clear["count"],
                 "last_clearout_date": clear["last_date"], "last_clearout_type": clear["last_type"]})
@@ -1096,7 +1101,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                     latest_timeout_rate = round(sum(row["shipment_timeout_rate"] for row in rate_rows) / len(rate_rows), 4)
             else:
                 latest_timeout_rate = None
-            high.append({"branch": branch, "parent_name": parent, "stagnant_score": score,
+            high.append({"branch": branch, "province": province_of(branch, mapping), "parent_name": parent, "stagnant_score": score,
                 "is_new": rolling_score(branch, previous_day) < 6 or rolling_score(branch, two_days_prior) < 6,
                 "deduction_level": deduction["level"], "deduction_average": deduction["average"],
                 "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],

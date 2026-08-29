@@ -3,5 +3,6 @@ site-deploy/
 __pycache__/
 *.py[cod]
 *.tmp
+.tmp-edge-profile*/
 *.xlsx
 数据源/

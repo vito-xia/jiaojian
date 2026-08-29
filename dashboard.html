@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=21">
+  <link rel="stylesheet" href="assets/dashboard.css?v=24">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -99,11 +99,16 @@
           <small>同时筛选三张表，极差熔断仅保留最近 20 条</small>
         </div>
         <div class="platform-search-control">
-          <label class="branch-search-input platform-search-input" for="platformSearch">
-            <span class="search-glyph" aria-hidden="true"></span>
-            <input id="platformSearch" type="search" autocomplete="off" placeholder="搜索网点、一级公司、管控动作或反馈结果">
-            <button id="clearPlatformSearch" type="button" hidden>清除</button>
-          </label>
+          <div class="search-control-row">
+            <label class="branch-search-input platform-search-input" for="platformSearch">
+              <span class="search-glyph" aria-hidden="true"></span>
+              <input id="platformSearch" type="search" autocomplete="off" placeholder="搜索省区、网点、一级公司、管控动作或反馈结果">
+              <button id="clearPlatformSearch" type="button" hidden>清除</button>
+            </label>
+            <select id="platformProvinceFilter" class="province-filter" aria-label="省区筛选器">
+              <option value="">省区筛选器</option>
+            </select>
+          </div>
           <span class="platform-search-hint" id="platformSearchHint">输入关键词筛选当前模块</span>
         </div>
       </div>
@@ -119,7 +124,7 @@
           </div>
           <div class="table-scroll compact-scroll">
             <table class="data-table compact-table score-table">
-              <thead><tr><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
+              <thead><tr><th>省区</th><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
               <tbody id="scoreBody"></tbody>
             </table>
           </div>
@@ -137,7 +142,7 @@
             </div>
             <div class="table-scroll compact-scroll">
               <table class="data-table compact-table control-table">
-                <thead><tr><th>管控日期</th><th>网点名称</th><th>管控动作</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
+                <thead><tr><th>管控日期</th><th>省区</th><th>网点名称</th><th>管控动作</th><th>停滞积分</th><th>历史清退</th><th>最近清退</th></tr></thead>
                 <tbody id="controlBody"></tbody>
               </table>
             </div>
@@ -154,7 +159,7 @@
             </div>
             <div class="table-scroll compact-scroll">
               <table class="data-table compact-table extreme-table">
-                <thead><tr><th>违规日期</th><th>网点名称</th><th>反馈结果</th><th>超时单量</th><th>超时率</th></tr></thead>
+                <thead><tr><th>违规日期</th><th>省区</th><th>网点名称</th><th>反馈结果</th><th>超时单量</th><th>超时率</th></tr></thead>
                 <tbody id="extremeBody"></tbody>
               </table>
             </div>
@@ -180,11 +185,16 @@
           <p id="branchSearchDescription">输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。</p>
         </div>
         <div class="branch-search-control">
-          <label class="branch-search-input" for="branchSearch">
-            <span class="search-glyph" aria-hidden="true"></span>
-            <input id="branchSearch" type="search" autocomplete="off" placeholder="搜索网点名称，如：佛山南海" aria-controls="branchSearchResults">
-            <button id="clearBranchSearch" type="button" hidden>清除</button>
-          </label>
+          <div class="search-control-row">
+            <label class="branch-search-input" for="branchSearch">
+              <span class="search-glyph" aria-hidden="true"></span>
+              <input id="branchSearch" type="search" autocomplete="off" placeholder="搜索网点名称，如：佛山南海" aria-controls="branchSearchResults">
+              <button id="clearBranchSearch" type="button" hidden>清除</button>
+            </label>
+            <select id="branchProvinceFilter" class="province-filter" aria-label="省区筛选器">
+              <option value="">省区筛选器</option>
+            </select>
+          </div>
           <span class="branch-search-hint" id="branchSearchHint">输入关键词开始搜索</span>
         </div>
       </div>
@@ -267,11 +277,16 @@
           <small>搜索网点、编码、地区、异常等级或管控状态</small>
         </div>
         <div class="platform-search-control">
-          <label class="branch-search-input platform-search-input" for="deliverySearch">
-            <span class="search-glyph" aria-hidden="true"></span>
-            <input id="deliverySearch" type="search" autocomplete="off" placeholder="搜索派送网点、编码或管控状态">
-            <button id="clearDeliverySearch" type="button" hidden>清除</button>
-          </label>
+          <div class="search-control-row">
+            <label class="branch-search-input platform-search-input" for="deliverySearch">
+              <span class="search-glyph" aria-hidden="true"></span>
+              <input id="deliverySearch" type="search" autocomplete="off" placeholder="搜索派送网点、编码或管控状态">
+              <button id="clearDeliverySearch" type="button" hidden>清除</button>
+            </label>
+            <select id="deliveryProvinceFilter" class="province-filter" aria-label="省区筛选器">
+              <option value="">省区筛选器</option>
+            </select>
+          </div>
           <span class="platform-search-hint" id="deliverySearchHint">输入关键词筛选派送监控</span>
         </div>
       </div>
@@ -349,6 +364,6 @@
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=18"></script>
   <script src="assets/dashboard-loader.js?v=1"></script>
-  <script src="assets/dashboard.js?v=25"></script>
+  <script src="assets/dashboard.js?v=29"></script>
 </body>
 </html>
