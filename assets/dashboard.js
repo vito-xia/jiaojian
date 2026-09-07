@@ -75,6 +75,11 @@
     const amount = Number(value || 0);
     return `${amount.toLocaleString('zh-CN', { minimumFractionDigits: amount && amount < 1 ? 2 : 1, maximumFractionDigits: 2 })}%`;
   }
+  function customerDisplayName(customer) {
+    const name = String(customer?.customer || '未命名客户').trim() || '未命名客户';
+    const code = String(customer?.customer_code || '').trim();
+    return code ? `${name}（${code}）` : name;
+  }
   function formatOptionalNumber(value) { return value === null || value === undefined ? '—' : formatNumber(value); }
   function formatOptionalRate(value) { return value === null || value === undefined ? '—' : formatRate(value); }
   function jdTrendMetric(hours = state.jdTrendHours) {
@@ -439,13 +444,24 @@
 
   function scheduleBackgroundLoads() {
     const run = () => {
-      Promise.allSettled([ensurePlatformData('\u4eac\u4e1c'), ensureControlsData()])
-        .then(() => renderAll());
-      window.setTimeout(() => {
-        ensureDeliveryData()
-          .then(() => { if (state.platform === '\u6296\u97f3') renderAll(); })
-          .catch(error => console.warn(error));
-      }, 1800);
+      ensureControlsData()
+        .then(() => {
+          renderAll();
+          if (state.platform !== '\u6296\u97f3') return null;
+          return ensureDrawerData('\u6296\u97f3');
+        })
+        .then(() => {
+          if (state.platform === '\u6296\u97f3') renderBranchSearch();
+        })
+        .catch(error => console.warn(error))
+        .finally(() => {
+          window.setTimeout(() => {
+            if (state.platform !== '\u6296\u97f3') return;
+            ensureDeliveryData()
+              .then(() => { if (state.platform === '\u6296\u97f3') renderAll(); })
+              .catch(error => console.warn(error));
+          }, 4000);
+        });
     };
     if (typeof window.requestIdleCallback === 'function') {
       window.requestIdleCallback(run, { timeout: 1400 });
@@ -1708,13 +1724,14 @@
       ? `<div class="charts-heading jd-charts-heading"><div><h3>全部客户趋势</h3><span>${headingMeta}</span></div>${selector}</div>`
       : `<div class="charts-heading"><h3>全部客户趋势</h3><span>${headingMeta}</span></div>`;
     panel.innerHTML = heading + customers.map((customer, index) => {
+      const displayName = customerDisplayName(customer);
       const latest = customer.series.at(-1);
       const total = customer.series.reduce((sum, point) => sum + Number(point[metric.countField] || 0), 0);
       const latestRate = jd ? jdTimeoutRate(latest, metric.hours) : latest?.[metric.rateField];
       const detail = jd
         ? `发货量 · ${formatOptionalNumber(latest?.shipment_volume)} · ${escapeHtml(latest?.shipment_interval || '无法计算')} · ${currentDataLabel()} ${metricLabel}超时率 ${formatOptionalRate(latestRate)}`
         : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latestRate)}`;
-      return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(customer.customer)}">${escapeHtml(customer.customer)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(total)}</strong><span>${trendWindowLabel()} ${metricLabel}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${metricLabel}超时量</span><span><i class="line"></i>${metricLabel}超时率</span></div></article>`;
+      return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(total)}</strong><span>${trendWindowLabel()} ${metricLabel}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${metricLabel}超时量</span><span><i class="line"></i>${metricLabel}超时率</span></div></article>`;
     }).join('');
     $('#jdTrendMetric')?.addEventListener('change', event => {
       state.jdTrendHours = jdTrendMetric(event.target.value).hours;

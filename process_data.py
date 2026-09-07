@@ -147,6 +147,63 @@ def has_detail(value: Any) -> bool:
     return text(value) not in EMPTY_DETAIL_VALUES
 
 
+def build_latest_customer_metadata(timeout_rows: list[dict[str, Any]]) -> dict[str, dict[tuple[str, ...], tuple[str, int, str]]]:
+    """按客户保存最近一天能获取到的发运兜底和客户编码。"""
+    fallback_by_code: dict[tuple[str, ...], tuple[str, int, str]] = {}
+    fallback_by_name: dict[tuple[str, ...], tuple[str, int, str]] = {}
+    code_by_name: dict[tuple[str, ...], tuple[str, int, str]] = {}
+
+    def update(store: dict[tuple[str, ...], tuple[str, int, str]], key: tuple[str, ...], value: str, day: str, position: int) -> None:
+        current = store.get(key)
+        if current is None or (day, position) >= (current[0], current[1]):
+            store[key] = (day, position, value)
+
+    for position, row in enumerate(timeout_rows):
+        platform = text(row.get("platform"))
+        branch = text(row.get("branch"))
+        customer = text(row.get("customer"))
+        customer_code = text(row.get("customer_code"))
+        day = text(row.get("date"))
+        if not platform or not customer:
+            continue
+        name_key = (platform, branch, customer)
+        if customer_code:
+            update(code_by_name, name_key, customer_code, day, position)
+        fallback = text(row.get("has_shipping_fallback"))
+        if not has_detail(fallback):
+            continue
+        update(fallback_by_name, name_key, fallback, day, position)
+        if customer_code:
+            update(fallback_by_code, (platform, customer_code), fallback, day, position)
+
+    return {
+        "fallback_by_code": fallback_by_code,
+        "fallback_by_name": fallback_by_name,
+        "code_by_name": code_by_name,
+    }
+
+
+def latest_shipping_fallback(row: dict[str, Any], metadata: dict[str, dict[tuple[str, ...], tuple[str, int, str]]]) -> str:
+    platform = text(row.get("platform"))
+    branch = text(row.get("branch"))
+    customer = text(row.get("customer"))
+    customer_code = text(row.get("customer_code"))
+    name_value = metadata["fallback_by_name"].get((platform, branch, customer))
+    if name_value is not None:
+        return name_value[2]
+    if customer_code:
+        value = metadata["fallback_by_code"].get((platform, customer_code))
+        if value is not None:
+            return value[2]
+    return text(row.get("has_shipping_fallback"))
+
+
+def latest_customer_code(row: dict[str, Any], metadata: dict[str, dict[tuple[str, ...], tuple[str, int, str]]]) -> str:
+    key = (text(row.get("platform")), text(row.get("branch")), text(row.get("customer")))
+    value = metadata["code_by_name"].get(key)
+    return value[2] if value is not None else text(row.get("customer_code"))
+
+
 def excel_column_number(letters: str) -> int:
     result = 0
     for character in letters.upper():
@@ -910,18 +967,31 @@ def build_delivery_monitor(controls, score_rows, daily_scores, cumulative_scores
         "high_scores_by_date": high_scores_by_date, "score_details_by_date": score_details_by_date,
         "trends": trends,
     }
-def build_trends(timeout_rows: list[dict[str, Any]], mapping: dict[str, dict[str, str]]) -> dict[str, dict[str, Any]]:
+def build_trends(
+    timeout_rows: list[dict[str, Any]],
+    mapping: dict[str, dict[str, str]],
+    customer_metadata: dict[str, dict[tuple[str, ...], tuple[str, int, str]]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    customer_metadata = customer_metadata or build_latest_customer_metadata(timeout_rows)
     work: dict[str, dict[str, dict[str, Any]]] = {p: defaultdict(dict) for p in PLATFORMS}
     for row in timeout_rows:
         branch_box = work[row["platform"]][row["branch"]]
+        customer_code = latest_customer_code(row, customer_metadata)
+        shipping_fallback = latest_shipping_fallback(row, customer_metadata)
         if row["platform"] == "京东":
             customer_key = ("code", row["customer_code"]) if row["customer_code"] else ("name", row["customer"])
+            if row["customer_code"]:
+                code_fallback = customer_metadata["fallback_by_code"].get((row["platform"], row["customer_code"]))
+                if code_fallback is not None:
+                    shipping_fallback = code_fallback[2]
         else:
             customer_key = row["customer"]
         customer_box = branch_box.setdefault(customer_key, {
-            "customer": row["customer"], "customer_code": row["customer_code"],
-            "has_shipping_fallback": row["has_shipping_fallback"], "series": [], "total_36h": 0,
+            "customer": row["customer"], "customer_code": customer_code,
+            "has_shipping_fallback": shipping_fallback, "series": [], "total_36h": 0,
         })
+        customer_box["customer_code"] = customer_code or customer_box["customer_code"]
+        customer_box["has_shipping_fallback"] = shipping_fallback
         point = {k: row[k] for k in ("date", "timeout_24h", "timeout_36h", "timeout_rate_36h", "timeout_48h", "timeout_72h", "timeout_96h", "timeout_120h")}
         if row["platform"] == "京东":
             point.update({k: row.get(k) for k in (
@@ -1000,6 +1070,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     timeout_rows = [row for row in timeout_rows if not customer_is_excluded(row["customer"])]
     top5 = [row for row in top5 if not customer_is_excluded(row["customer"])]
     branch_top5_rows = [row for row in branch_top5_rows if not customer_is_excluded(row["customer"])]
+    customer_metadata = build_latest_customer_metadata(timeout_rows)
     excluded_timeout_count = raw_timeout_count - len(timeout_rows)
     excluded_top5_count = raw_top5_count - len(top5)
     dates_by_platform = {p: sorted({r["date"] for r in timeout_rows if r["platform"] == p}) for p in PLATFORMS}
@@ -1034,7 +1105,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 history_shortage = shortage.get(platform, {}).get(parent)
                 if history_shortage is None and platform not in ("抖音", "淘宝"):
                     history_shortage = shortage_all.get(parent)
-                enriched.append({**row, "rank": rank, "province": province_of(branch, mapping), "parent_name": parent,
+                enriched.append({**row, "has_shipping_fallback": latest_shipping_fallback(row, customer_metadata), "rank": rank, "province": province_of(branch, mapping), "parent_name": parent,
                     "stagnant_score": rolling_score(branch, day) if platform == "抖音" else None,
                     "current_control": ctrl["action"] if platform == "抖音" else "",
                     "merchant_control_count": merchant_counts.get(branch, 0) if platform == "抖音" else None,
@@ -1146,7 +1217,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         "history_all_lookup": shortage_all,
         "branch_top5_data": branch_top5_data,
         "branch_score_trends": build_branch_score_trends(score_rows),
-        "trends": build_trends(timeout_rows, mapping),
+        "trends": build_trends(timeout_rows, mapping, customer_metadata),
         "delivery_monitor": delivery_monitor,
     }
 
