@@ -15,6 +15,9 @@
     '\u4eac\u4e1c': 'drawer-jd',
     '\u5feb\u624b': 'drawer-kuaishou'
   });
+  const TDAY_CHUNK = 'tday';
+  const LONG_ORDER_CHUNK = 'long-order';
+  const TDAY_PLATFORMS = Object.freeze(['\u6296\u97f3', '\u6dd8\u5b9d']);
 
   function hasDataKey(value, key) {
     return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
@@ -47,6 +50,28 @@
 
   function ensureDeliveryData() {
     return data.delivery_monitor ? Promise.resolve(data) : loadDataChunk('delivery');
+  }
+  function localToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+  function isTdayPlatform(platform = state.platform) { return TDAY_PLATFORMS.includes(platform); }
+  function isTdayActive() { return isTdayPlatform() && state.date === localToday(); }
+  function tdayDataReady(day = state.date) { return data.t_day?.date === day; }
+  function ensureTdayData() { return tdayDataReady() ? Promise.resolve(data) : loadDataChunk(TDAY_CHUNK); }
+  function longOrderDataReady() { return Boolean(data.long_order_trends && typeof data.long_order_trends === 'object'); }
+  function ensureLongOrderData() { return longOrderDataReady() ? Promise.resolve(data) : loadDataChunk(LONG_ORDER_CHUNK); }
+  function tdayPlatformData() {
+    if (!data.t_day?.date || data.t_day.date !== localToday()) return null;
+    return data.t_day?.platforms?.[state.platform] || null;
+  }
+  function tdayStatusLabel(item = tdayPlatformData()) {
+    if (!item) return '数据源未上传';
+    if (item.source_status === 'uploaded') {
+      return item.customer_mapping_status === 'ready' ? '内网轨迹已上传 · 客户已关联' : '内网轨迹已上传';
+    }
+    if (item.source_status === 'invalid_format' || item.trace_source_status === 'invalid_format') return '内网轨迹格式异常';
+    return '数据源未上传';
   }
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -123,9 +148,20 @@
     const [year, month] = String(value).split('-');
     return year && month ? `${year}年${Number(month)}月` : value;
   }
-  function datesForPlatform() { return data.platforms?.[state.platform]?.dates || data.platform_dates?.[state.platform] || []; }
-  function top10Rows() { return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || []; }
+  function datesForPlatform() {
+    const source = [...(data.platforms?.[state.platform]?.dates || data.platform_dates?.[state.platform] || [])];
+    if (isTdayPlatform()) {
+      const today = localToday();
+      if (!source.includes(today)) source.push(today);
+    }
+    return source.sort();
+  }
+  function top10Rows() {
+    if (isTdayActive()) return tdayPlatformData()?.rows || [];
+    return data.platforms?.[state.platform]?.top10_by_date?.[state.date] || [];
+  }
   function topRows() {
+    if (isTdayActive()) return top10Rows();
     const platform = data.platforms?.[state.platform] || {};
     return state.platform === "\u6296\u97f3" || state.platform === "\u4eac\u4e1c"
       ? platform.top60_by_date?.[state.date] || top10Rows()
@@ -133,16 +169,17 @@
   }
   function filteredTopRows() { return topRows().filter(row => provinceMatches(row, state.branchProvince)); }
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
-  function currentControls() { return data.controls_by_date?.[currentControlDate()] || []; }
-  function currentScores() { return data.high_scores_by_date?.[state.date] || []; }
+  function currentControls() { return isTdayActive() ? [] : data.controls_by_date?.[currentControlDate()] || []; }
+  function currentScores() { return isTdayActive() ? [] : data.high_scores_by_date?.[state.date] || []; }
   function currentExtremeRecords() {
+    if (isTdayActive()) return [];
     return [...(data.extreme_records || [])]
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.branch || '').localeCompare(String(b.branch || ''), 'zh-CN'))
       .slice(0, 20);
   }
   function deliveryMonitor() { return data.delivery_monitor || {}; }
-  function currentDeliveryControls() { return deliveryMonitor().controls_by_date?.[state.date] || []; }
-  function currentDeliveryHighScores() { return deliveryMonitor().high_scores_by_date?.[state.date] || []; }
+  function currentDeliveryControls() { return isTdayActive() ? [] : deliveryMonitor().controls_by_date?.[state.date] || []; }
+  function currentDeliveryHighScores() { return isTdayActive() ? [] : deliveryMonitor().high_scores_by_date?.[state.date] || []; }
   function provinceKey(value) {
     const normalized = String(value ?? '').trim();
     return normalized || EMPTY_PROVINCE_VALUE;
@@ -215,9 +252,9 @@
   function filteredControls() { return filterPlatformRows(currentControls()); }
   function filteredScores() { return filterPlatformRows(currentScores()); }
   function filteredExtremeRecords() { return filterPlatformRows(currentExtremeRecords()); }
-  function currentDataLabel() { return state.platform === '京东' ? 'T-2' : 'T-1'; }
-  function currentWindowLabel() { return state.platform === '京东' ? 'T-8 至 T-2' : 'T-7 至 T-1'; }
-  function trendWindowLabel() { return '最近 15 天'; }
+  function currentDataLabel() { return isTdayActive() ? 'T日' : state.platform === '京东' ? 'T-2' : 'T-1'; }
+  function currentWindowLabel() { return isTdayActive() ? 'T日实时快照' : state.platform === '京东' ? 'T-8 至 T-2' : 'T-7 至 T-1'; }
+  function trendWindowLabel() { return isTdayActive() ? 'T日分拨时长' : '最近 15 天'; }
 
   function scoreClass(value) {
     const score = Number(value || 0);
@@ -507,7 +544,7 @@
       renderAll();
       showToast('已切换至' + state.platform + '平台');
     });
-    $('#dateSelect').addEventListener('change', event => {
+    $('#dateSelect').addEventListener('change', async event => {
       state.date = event.target.value;
       state.controlPage = 1;
       state.scorePage = 1;
@@ -520,6 +557,15 @@
       state.topPage = 1;
       state.jdControlPage = 1;
       updateDateButtons();
+      if (isTdayActive()) {
+        setText('#freshness', '正在加载 T 日数据');
+        try {
+          await ensureTdayData();
+        } catch (error) {
+          console.error(error);
+          showToast('T 日数据加载失败，请重试');
+        }
+      }
       renderAll();
     });
 
@@ -690,6 +736,12 @@
     $('#previousDate').addEventListener('click', () => moveDate(-1));
     $('#nextDate').addEventListener('click', () => moveDate(1));
     document.addEventListener('click', event => {
+      const tdayMetric = event.target.closest('.js-tday-trend');
+      if (tdayMetric) {
+        event.preventDefault();
+        openTdayTrendDrawer(tdayMetric.dataset.rowId, Number(tdayMetric.dataset.hours || 36));
+        return;
+      }
       const branch = event.target.closest('.js-branch');
       if (branch) openDrawer(decodeURIComponent(branch.dataset.branch), branch.dataset.drawerMode || 'pickup');
     });
@@ -732,7 +784,7 @@
     $('#nextDate').disabled = index < 0 || index >= dates.length - 1;
   }
 
-  function moveDate(direction) {
+  async function moveDate(direction) {
     const dates = datesForPlatform();
     const index = dates.indexOf(state.date);
     const next = dates[index + direction];
@@ -748,6 +800,15 @@
     state.topPage = 1;
     state.jdControlPage = 1;
     updateDateButtons();
+    if (isTdayActive()) {
+      setText('#freshness', '正在加载 T 日数据');
+      try {
+        await ensureTdayData();
+      } catch (error) {
+        console.error(error);
+        showToast('T 日数据加载失败，请重试');
+      }
+    }
     renderAll();
   }
 
@@ -764,29 +825,53 @@
 
   function renderMeta() {
     const meta = data.meta;
+    const tday = isTdayActive();
     setText('#freshness', `${currentDataLabel()} 数据日 ${state.date || '—'}`);
     $('#freshness').innerHTML = `<span class="live-dot"></span>${currentDataLabel()} 数据日 ${escapeHtml(state.date || '—')}`;
-    const metaItems = [
-      `交件数据 ${meta.timeout_start} — ${meta.as_of}`,
-      `${currentWindowLabel()} 监控窗口`,
-      `${state.platform}平台视图`
-    ];
-    if (state.platform === '抖音') {
+    const metaItems = tday
+      ? [`T 日快照 ${state.date || '—'}`, `${state.platform} · ${tdayStatusLabel()}`, `数据截止 ${tdayPlatformData()?.trace_snapshot_at || '—'}`]
+      : [
+        `交件数据 ${meta.timeout_start} — ${meta.as_of}`,
+        `${currentWindowLabel()} 监控窗口`,
+        `${state.platform}平台视图`
+      ];
+    if (!tday && state.platform === '抖音') {
       metaItems.splice(1, 0, `积分更新至 ${meta.score_as_of || '—'}`, `管控更新至 ${meta.control_as_of || '—'}`);
     }
     $('#metaStrip').innerHTML = metaItems.map((item, index) => `<span>${index ? '<i></i>' : ''}${escapeHtml(item)}</span>`).join('');
     setText('#top10Platform', state.platform);
     setText('#top10Date', state.date || '—');
-    const rankingSize = state.platform === '抖音' || state.platform === '京东' ? 'TOP60' : 'TOP10';
-    setText('#warningSubtitle', `${currentDataLabel()} 交件超时 ${rankingSize} 客户，点击分部查看全部客户${trendWindowLabel()}的趋势。`);
-    setText('#branchSearchDescription', state.platform === '京东' ? '输入客户、分部或一级公司名称，查看匹配网点最近8个自然日客户交件超时情况。' : '输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。');
+    const rankingSize = tday ? 'TOP10' : state.platform === '抖音' || state.platform === '京东' ? 'TOP60' : 'TOP10';
+    setText('#warningSubtitle', tday
+      ? `${state.platform} T 日按内网轨迹展示待发运 TOP10；点击 24H / 36H 数值查看时长趋势。`
+      : `${currentDataLabel()} 交件超时 ${rankingSize} 客户，点击分部查看全部客户${trendWindowLabel()}的趋势。`);
+    setText('#branchSearchDescription', tday
+      ? 'T 日以当天内网轨迹为主；客户明细只作单号归属补充，点击 24H / 36H 数值查看趋势。'
+      : state.platform === '京东' ? '输入客户、分部或一级公司名称，查看匹配网点最近8个自然日客户交件超时情况。' : '输入客户、分部或一级公司名称，查看匹配网点最近 15 天的 36H 交件超时与客户趋势。');
     const methodology = $('#methodologySection');
-    if (methodology) methodology.hidden = state.platform === '京东';
+    if (methodology) methodology.hidden = tday || state.platform === '京东';
     setText('#footerMeta', `生成于 ${meta.generated_at} · 本地离线运行`);
   }
 
   function renderKpis() {
     const rows = top10Rows();
+    if (isTdayActive()) {
+      const item = tdayPlatformData() || {};
+      const kpis = item.kpis || {};
+      const groupLabel = item.row_dimension === 'customer' ? '客户' : '网点';
+      setText('.kpi-primary > p', 'T日 · 36H待发运超时');
+      setText('#kpiTimeout', formatOptionalNumber(kpis.pending_36h));
+      setText('#kpiTimeoutNote', `${state.date || '—'} · 内网轨迹当前快照`);
+      setText('#kpiRiskLabel', 'T日 · 24H待发运预警');
+      setText('#kpiRisk', formatOptionalNumber(kpis.pending_24h));
+      setText('#kpiRiskNote', `${formatOptionalNumber(kpis.pending_count)} 票当前未发运`);
+      setText('#kpiControlLabel', '始发退回');
+      setText('#kpiControl', formatOptionalNumber(kpis.start_return_count));
+      setText('#kpiControlNote', `${formatOptionalNumber(kpis.start_return_36h)} 票达到36H · ${tdayStatusLabel(item)}`);
+      setText('#kpiBranches', formatOptionalNumber(kpis.group_count));
+      setText('#kpiBranchesNote', `TOP10 ${groupLabel} · ${formatOptionalNumber(kpis.total_waybills)} 个唯一运单`);
+      return;
+    }
     const jd = state.platform === '京东';
     const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
     const total = rows.reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
@@ -861,9 +946,29 @@
     const clear = $('#clearBranchSearch');
     const results = $('#branchSearchResults');
     const query = String(state.branchQuery || '').trim();
-    const branchReady = drawerDataReady(state.platform);
     const optionRows = branchProvinceRows();
     state.branchProvince = renderProvinceFilter('#branchProvinceFilter', optionRows, state.branchProvince);
+    if (isTdayActive()) {
+      if (input.value !== state.branchQuery) input.value = state.branchQuery;
+      clear.hidden = !state.branchQuery;
+      const rows = filteredTopRows();
+      const branchCount = new Set(rows.map(row => row.branch)).size;
+      if (!query) {
+        results.hidden = true;
+        results.innerHTML = '';
+        setText('#branchSearchHint', `覆盖 ${formatNumber(branchCount)} 个 T 日网点 · 仅搜索首页 TOP10`);
+        return;
+      }
+      const normalized = query.toLocaleLowerCase('zh-CN');
+      const matches = rows.filter(row => `${row.branch || ''} ${row.parent_name || ''} ${row.customer || ''} ${row.customer_code || ''}`.toLocaleLowerCase('zh-CN').includes(normalized)).slice(0, 10);
+      results.hidden = false;
+      setText('#branchSearchHint', matches.length ? `找到 ${matches.length} 个 T 日匹配网点/客户` : '未找到 T 日匹配网点/客户');
+      results.innerHTML = matches.length
+        ? `<div class="branch-search-results-head"><div><span>T DAY RESULTS</span><strong>${escapeHtml(query)}</strong></div><p>当天首页仅展示 TOP10</p></div><div class="branch-search-results-grid">${matches.map(row => `<button class="branch-search-result js-branch" type="button" data-branch="${encodeName(row.branch)}"><span class="branch-search-name"><strong title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}</strong><small title="${escapeHtml(row.customer || '网点汇总')}">${escapeHtml(row.customer || '网点汇总')}</small></span><span class="branch-search-metrics"><span><b>${formatOptionalNumber(row.timeout_24h)}</b><small>T日 24H</small></span><span><b>${formatOptionalNumber(row.timeout_36h)}</b><small>T日 36H</small></span></span><span class="branch-search-open">查看 T 日摘要<i>打开抽屉</i></span></button>`).join('')}</div>`
+        : `<div class="branch-search-empty"><strong>未找到“${escapeHtml(query)}”</strong><span>请尝试网点、客户或一级公司名称。</span></div>`;
+      return;
+    }
+    const branchReady = drawerDataReady(state.platform);
     const branchCount = branchReady
       ? Object.values(data.trends?.[state.platform] || {}).filter(branchData => provinceMatches(branchData, state.branchProvince)).length
       : new Set(filteredTopRows().map(row => row.branch)).size;
@@ -895,7 +1000,47 @@
         <span class="branch-search-open">${row.lastActiveDate ? `最近数据 ${shortDate(row.lastActiveDate)}` : '最近15天暂无数据'}<i>查看趋势</i></span>
       </button>`).join('')}</div>`;
   }
+  function tdayMetricButton(row, hours) {
+    const value = row?.[`timeout_${hours}h`];
+    const label = formatOptionalNumber(value);
+    return `<button class="tday-metric-button js-tday-trend" type="button" data-row-id="${escapeHtml(row?.id || '')}" data-hours="${hours}" aria-label="打开${hours}H分拨交件时长趋势">${escapeHtml(label)}<span>${hours}H</span></button>`;
+  }
+  function renderTdayTop10() {
+    const item = tdayPlatformData() || {};
+    const rows = filteredTopRows();
+    renderJdThresholdControls(false);
+    renderTopPageSizeControl(false);
+    const table = $('#top10Table');
+    table.style.minWidth = '940px';
+    table.classList.remove('douyin-columns', 'jd-columns');
+    table.classList.add('tday-columns');
+    $('#top10Head').innerHTML = '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>24H超时量</th><th>36H超时量</th></tr>';
+    if (!rows.length) {
+      const emptyCopy = item.source_status === 'uploaded' ? '内网轨迹已上传，但当前没有可展示的 TOP10 记录' : '数据源未上传';
+      $('#top10Body').innerHTML = `<tr class="empty-row"><td colspan="6">${escapeHtml(emptyCopy)}</td></tr>`;
+    } else {
+      $('#top10Body').innerHTML = rows.map(row => {
+        const customerLabel = row.customer || (item.row_dimension === 'branch' ? '网点汇总' : '未命名客户');
+        const customerNote = row.customer_code ? `客户编码 ${escapeHtml(row.customer_code)}` : row.customer ? '客户编码未提供' : '客户明细未关联';
+        const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(customerLabel)}">${escapeHtml(customerLabel)}</span><span class="subline">${customerNote}</span></div>`;
+        const identity = `<td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.province)}</td><td>${branchButton(row.branch, row.parent_name, 'pickup', false)}</td><td>${customer}</td>`;
+        return `<tr>${identity}<td>${tdayMetricButton(row, 24)}</td><td>${tdayMetricButton(row, 36)}</td></tr>`;
+      }).join('');
+    }
+    const pagination = $('#top10Pagination');
+    if (pagination) { pagination.hidden = true; pagination.innerHTML = ''; }
+    setText('#warningStatus', tdayStatusLabel(item));
+    const dimension = item.row_dimension === 'customer' ? '客户' : '网点';
+    setText('#top10Caption', `T 日 · 按内网轨迹 ${dimension} 36H待发运超时量展示前 10 条 · 点击 24H / 36H 查看趋势`);
+    setText('#top10Footnote', item.source_status === 'uploaded'
+      ? `趋势口径：待发运为“第一条分拨扫描时间为空”的当前运单，始发退回按“第一条异常记录时间 - 第一条揽收时间”计算；数据截止 ${item.trace_snapshot_at || '—'}。`
+      : item.error || 'T 日内网轨迹未上传或不是目标日期的当前快照，当前不保留前一天数据。');
+  }
   function renderTop10() {
+    if (isTdayActive()) {
+      renderTdayTop10();
+      return;
+    }
     const rows = filteredTopRows();
     const douyin = state.platform === '抖音';
     const jd = state.platform === '京东';
@@ -905,6 +1050,7 @@
     renderTopPageSizeControl(paginated);
     const table = $('#top10Table');
     table.style.minWidth = douyin ? '1500px' : jd ? '1160px' : '1120px';
+    table.classList.remove('tday-columns');
     table.classList.toggle('douyin-columns', douyin);
     table.classList.toggle('jd-columns', jd);
     $('#top10Head').innerHTML = douyin
@@ -1034,7 +1180,7 @@
     renderPagination($('#jdControlPagination'), state.jdControlPage, pages, rows.length, 'jd-control');
   }
   function renderPlatformModule() {
-    const douyin = state.platform === '抖音';
+    const douyin = state.platform === '抖音' && !isTdayActive();
     $('#platform-control').hidden = !douyin;
     $('#platformControlNav').hidden = !douyin;
     if (!douyin) return;
@@ -1135,7 +1281,7 @@
   }
 
   function renderDeliveryModule() {
-    const active = state.platform === '抖音' && Boolean(deliveryMonitor().score_dates?.length || deliveryMonitor().control_dates?.length);
+    const active = !isTdayActive() && state.platform === '抖音' && Boolean(deliveryMonitor().score_dates?.length || deliveryMonitor().control_dates?.length);
     const section = $('#delivery-score-monitor');
     const nav = $('#deliveryScoreNav');
     if (section) section.hidden = !active;
@@ -1275,24 +1421,32 @@
     panel.classList.remove('jd-analysis-panel');
     const scenes = ['物流停滞-揽收端', '物流停滞-全链路'];
     const branchScenes = data.branch_score_trends?.[branch] || {};
-    const availableScenes = scenes.filter(scene => (branchScenes[scene] || []).length);
+    const longOrderSource = data.long_order_trends?.[branch] || [];
+    const availableScenes = scenes.filter(scene => (branchScenes[scene] || []).length || (scene === '物流停滞-全链路' && longOrderSource.length));
     if (!availableScenes.includes(state.scoreScene)) state.scoreScene = availableScenes[0] || scenes[0];
     const scene = state.scoreScene;
     const isPickup = scene === '物流停滞-揽收端';
     const source = branchScenes[scene] || [];
     const byDate = new Map(source.map(point => [point.date, point]));
+    const longOrderByDate = new Map(longOrderSource.map(point => [point.date, point]));
     const series = range.map(date => {
       const sourcePoint = byDate.get(date);
-      if (sourcePoint) return {
-        ...sourcePoint,
-        shipment_timeout_rate: isPickup ? Number(sourcePoint.shipment_timeout_rate || 0) : sourcePoint.shipment_timeout_rate,
-        shipment_timeout_abnormal_count: isPickup ? Number(sourcePoint.shipment_timeout_abnormal_count || 0) : sourcePoint.shipment_timeout_abnormal_count
-      };
+      if (isPickup) {
+        if (sourcePoint) return {
+          ...sourcePoint,
+          shipment_timeout_rate: Number(sourcePoint.shipment_timeout_rate ?? 0),
+          shipment_timeout_abnormal_count: Number(sourcePoint.shipment_timeout_abnormal_count ?? 0)
+        };
+        return { date, score: null, shipment_timeout_rate: 0, shipment_timeout_abnormal_count: 0 };
+      }
+      const longOrderPoint = longOrderByDate.get(date);
       return {
         date,
-        score: isPickup ? null : 0,
-        shipment_timeout_rate: isPickup ? 0 : null,
-        shipment_timeout_abnormal_count: isPickup ? 0 : null
+        score: sourcePoint ? sourcePoint.score : null,
+        shipment_timeout_rate: longOrderPoint && longOrderPoint.abnormal_rate !== null && longOrderPoint.abnormal_rate !== undefined
+          ? Number(longOrderPoint.abnormal_rate) : null,
+        shipment_timeout_abnormal_count: longOrderPoint && longOrderPoint.abnormal_count !== null && longOrderPoint.abnormal_count !== undefined
+          ? Number(longOrderPoint.abnormal_count) : null
       };
     });
     const hasData = series.some(point => point.score !== null || point.shipment_timeout_rate !== null || point.shipment_timeout_abnormal_count !== null);
@@ -1300,9 +1454,12 @@
     panel.hidden = false;
     panel.innerHTML = '<div class="score-trend-head"><div><h3>近期扣分趋势</h3><p>' + escapeHtml(branch) + ' · ' + escapeHtml(range[0] || '—') + ' — ' + escapeHtml(range.at(-1) || '—') + '</p></div><label><span>违规场景</span><select id="scoreSceneSelect">' + options + '</select></label></div>';
     if (hasData) {
+      const countLabel = isPickup ? '异常单量' : '超长单异常运单数';
+      const rateLabel = isPickup ? '超时率' : '超长单异常率';
+      const longOrderLimit = Number(data.long_order_meta?.row_limit || 1000);
       panel.innerHTML += '<canvas class="score-trend-chart" id="scoreTrendChart"></canvas><div class="chart-legend score-trend-legend">' +
-        (isPickup ? '<span><i></i>异常单量</span><span><i class="line"></i>超时率</span><span><i class="score"></i>扣分</span>' : '<span><i class="score-line"></i>扣分</span>') +
-        '</div>' + (isPickup ? '' : '<p class="score-trend-note">因平台未直接提供数据，超长单只展示扣分趋势</p>');
+        '<span><i></i>' + countLabel + '</span><span><i class="line"></i>' + rateLabel + '</span><span><i class="score"></i>扣分</span>' +
+        '</div>' + (isPickup ? '' : '<p class="score-trend-note">量率仅取“列表数据”前' + longOrderLimit + '条；未入前' + longOrderLimit + '或缺少源文件的日期留空。</p>');
     } else {
       panel.innerHTML += '<div class="score-trend-empty">当前网点在 ' + escapeHtml(range[0] || '—') + ' 至 ' + escapeHtml(range.at(-1) || '—') + ' 暂无该违规场景数据。</div>';
     }
@@ -1316,7 +1473,7 @@
     chartJobs = chartJobs.filter(job => job.kind !== 'score');
     const canvas = $('#scoreTrendChart');
     if (canvas) {
-      const draw = () => drawScoreTrendChart(canvas, series, isPickup ? 'pickup' : 'full');
+      const draw = () => drawScoreTrendChart(canvas, series, isPickup ? 'pickup' : 'long-order');
       chartJobs.push({ kind: 'score', canvas, draw });
       requestAnimationFrame(draw);
     }
@@ -1825,7 +1982,243 @@
     document.body.style.overflow = 'hidden';
   }
 
+  function tdayTrendRecord(rowId) {
+    return data.t_day?.trends?.[state.platform]?.[rowId] || {};
+  }
+
+  function openTdayBranchDrawer(branch) {
+    const rows = top10Rows().filter(row => row.branch === branch);
+    const item = tdayPlatformData() || {};
+    const parent = rows[0]?.parent_name || branch;
+    const values24 = rows.map(row => row.timeout_24h).filter(value => value !== null && value !== undefined && Number.isFinite(Number(value)));
+    const values36 = rows.map(row => row.timeout_36h).filter(value => value !== null && value !== undefined && Number.isFinite(Number(value)));
+    const total24 = values24.length ? values24.reduce((sum, value) => sum + Number(value), 0) : null;
+    const total36 = values36.length ? values36.reduce((sum, value) => sum + Number(value), 0) : null;
+    setText('#drawerKicker', `${state.platform} · T日摘要`);
+    setText('#drawerTitle', branch);
+    setText('#drawerParent', `一级公司 · ${parent}`);
+    $('#drawerSummary').innerHTML = [
+      [item.row_dimension === 'customer' ? '关联客户' : 'T日网点记录', `${rows.length}个`],
+      ['T日24H超时', formatOptionalNumber(total24)],
+      ['T日36H超时', formatOptionalNumber(total36)],
+      ['数据源状态', tdayStatusLabel(item)]
+    ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    $('#drawerScoreTrend').hidden = true;
+    $('#drawerScoreTrend').innerHTML = '';
+    $('#drawerHistory').hidden = true;
+    $('#drawerHistory').innerHTML = '';
+    hideDouyinAiAnalysis();
+    clearJdCustomerPeriodAnalysis();
+    chartJobs = [];
+    const panel = $('#drawerCharts');
+    panel.hidden = false;
+    const dimension = item.row_dimension === 'customer' ? '客户' : '网点记录';
+    panel.innerHTML = `<div class="charts-heading"><div><h3>T 日${dimension}趋势入口</h3><span>${rows.length ? '点击 24H / 36H 数值打开待发运与始发退回时长趋势。' : '当前 T 日暂无该网点记录。'}</span></div></div>${rows.map(row => `<article class="tday-branch-row"><div><strong title="${escapeHtml(row.customer || row.branch)}">${escapeHtml(row.customer || row.branch || '未命名网点')}</strong><small>${row.customer_code ? `客户编码 ${escapeHtml(row.customer_code)}` : row.customer ? '客户编码未提供' : '内网轨迹网点汇总'}</small></div><div class="tday-branch-metrics">${tdayMetricButton(row, 24)}${tdayMetricButton(row, 36)}</div></article>`).join('')}`;
+    const layer = $('#drawerLayer');
+    layer.classList.add('open');
+    layer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => $('#closeDrawer').focus(), 60);
+  }
+
+  function tdayTrendPoints(trend, name) {
+    return Array.isArray(trend?.trends?.[name]?.points) ? trend.trends[name].points : [];
+  }
+
+  function drawTdayMonotoneLine(context, coords) {
+    if (!coords.length) return;
+    context.beginPath();
+    context.moveTo(coords[0].x, coords[0].y);
+    if (coords.length === 1) return;
+    const slopes = coords.slice(0, -1).map((point, index) => {
+      const next = coords[index + 1];
+      return (next.y - point.y) / Math.max(1, next.x - point.x);
+    });
+    const tangents = new Array(coords.length).fill(0);
+    tangents[0] = slopes[0];
+    tangents[tangents.length - 1] = slopes.at(-1);
+    for (let index = 1; index < coords.length - 1; index += 1) {
+      tangents[index] = slopes[index - 1] * slopes[index] <= 0 ? 0 : (slopes[index - 1] + slopes[index]) / 2;
+    }
+    for (let index = 0; index < slopes.length; index += 1) {
+      const slope = slopes[index];
+      if (slope === 0) {
+        tangents[index] = 0;
+        tangents[index + 1] = 0;
+        continue;
+      }
+      const alpha = tangents[index] / slope;
+      const beta = tangents[index + 1] / slope;
+      const magnitude = alpha * alpha + beta * beta;
+      if (magnitude > 9) {
+        const scale = 3 / Math.sqrt(magnitude);
+        tangents[index] = scale * alpha * slope;
+        tangents[index + 1] = scale * beta * slope;
+      }
+    }
+    for (let index = 0; index < coords.length - 1; index += 1) {
+      const point = coords[index];
+      const next = coords[index + 1];
+      const span = next.x - point.x;
+      context.bezierCurveTo(
+        point.x + span / 3, point.y + tangents[index] * span / 3,
+        next.x - span / 3, next.y - tangents[index + 1] * span / 3,
+        next.x, next.y,
+      );
+    }
+  }
+
+  function drawTdayTrendChart(canvas, trend) {
+    if (!canvas || !canvas.isConnected) return;
+    const pending = tdayTrendPoints(trend, 'pending');
+    const startReturn = tdayTrendPoints(trend, 'start_return');
+    if (!pending.length && !startReturn.length) return;
+    const allPoints = [...pending, ...startReturn];
+    const xMax = Math.max(36, ...allPoints.map(point => Number(point.hours || 0)));
+    const cssWidth = Math.max(900, canvas.clientWidth || 900);
+    const cssHeight = 286;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(cssWidth * ratio);
+    canvas.height = Math.round(cssHeight * ratio);
+    const context = canvas.getContext('2d');
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, cssWidth, cssHeight);
+    const pad = { top: 30, right: 28, bottom: 48, left: 54 };
+    const width = cssWidth - pad.left - pad.right;
+    const height = cssHeight - pad.top - pad.bottom;
+    const maxCount = Math.max(1, ...allPoints.map(point => Number(point.count || 0)));
+    const yMax = Math.max(1, Math.ceil(maxCount / 5) * 5);
+    const toCoords = points => points.map(point => ({
+      x: pad.left + Number(point.hours || 0) / Math.max(1, xMax) * width,
+      y: pad.top + height - Number(point.count || 0) / yMax * height,
+      hours: Number(point.hours || 0),
+      count: Number(point.count || 0),
+    }));
+    const pendingCoords = toCoords(pending);
+    const returnCoords = toCoords(startReturn);
+    context.font = '10px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
+    context.textBaseline = 'middle';
+    for (let step = 0; step <= 4; step += 1) {
+      const y = pad.top + height - height * step / 4;
+      context.strokeStyle = 'rgba(0,0,0,.075)';
+      context.lineWidth = 1;
+      context.setLineDash(step ? [3, 4] : []);
+      context.beginPath(); context.moveTo(pad.left, y); context.lineTo(pad.left + width, y); context.stroke();
+      context.setLineDash([]);
+      context.fillStyle = '#86868b';
+      context.textAlign = 'right';
+      context.fillText(formatNumber(Math.round(yMax * step / 4)), pad.left - 8, y);
+    }
+    const labels = new Set([0, 24, 36, xMax]);
+    const labelStep = Math.max(1, Math.ceil(xMax / 10));
+    for (let hour = 0; hour <= xMax; hour += labelStep) labels.add(hour);
+    [...labels].sort((a, b) => a - b).forEach(hour => {
+      const x = pad.left + hour / Math.max(1, xMax) * width;
+      context.strokeStyle = hour === 36 ? 'rgba(255,59,48,.5)' : hour === 24 ? 'rgba(255,159,10,.45)' : 'rgba(0,0,0,.04)';
+      context.setLineDash(hour === 0 ? [] : [4, 4]);
+      context.beginPath(); context.moveTo(x, pad.top); context.lineTo(x, pad.top + height); context.stroke();
+      context.setLineDash([]);
+      context.fillStyle = hour === 36 ? '#ff3b30' : hour === 24 ? '#b86b00' : '#86868b';
+      context.textAlign = 'center';
+      context.fillText(`${hour}H`, x, pad.top + height + 20);
+    });
+    context.fillStyle = '#86868b';
+    context.textAlign = 'center';
+    context.fillText('时长（小时）', pad.left + width / 2, cssHeight - 11);
+    context.textAlign = 'right';
+    context.fillText('达到横轴时长的票数', pad.left + width, 13);
+
+    if (pendingCoords.length) {
+      drawTdayMonotoneLine(context, pendingCoords);
+      context.lineTo(pendingCoords.at(-1).x, pad.top + height);
+      context.lineTo(pendingCoords[0].x, pad.top + height);
+      context.closePath();
+      const fill = context.createLinearGradient(0, pad.top, 0, pad.top + height);
+      fill.addColorStop(0, 'rgba(0,113,227,.18)');
+      fill.addColorStop(1, 'rgba(0,113,227,.02)');
+      context.fillStyle = fill;
+      context.fill();
+      drawTdayMonotoneLine(context, pendingCoords);
+      context.strokeStyle = '#0071e3';
+      context.lineWidth = 2.6;
+      context.lineJoin = 'round';
+      context.lineCap = 'round';
+      context.stroke();
+    }
+    if (returnCoords.length) {
+      drawTdayMonotoneLine(context, returnCoords);
+      context.strokeStyle = '#ff3b30';
+      context.lineWidth = 2.2;
+      context.lineJoin = 'round';
+      context.lineCap = 'round';
+      context.stroke();
+    }
+  }
+
+  async function openTdayTrendDrawer(rowId, hours = 36) {
+    if (!isTdayActive()) return;
+    if (!tdayDataReady()) {
+      showDrawerLoading('T 日趋势', '正在加载 T 日轨迹数据');
+      try {
+        await ensureTdayData();
+      } catch (error) {
+        console.error(error);
+        showToast('T 日数据加载失败，请重试');
+        return;
+      }
+    }
+    const row = top10Rows().find(item => item.id === rowId);
+    if (!row) {
+      showDrawerLoading('T 日趋势', '当前 T 日没有该记录');
+      return;
+    }
+    const threshold = Number(hours) === 24 ? 24 : 36;
+    const trend = tdayTrendRecord(rowId);
+    const item = tdayPlatformData() || {};
+    const pending = tdayTrendPoints(trend, 'pending');
+    const startReturn = tdayTrendPoints(trend, 'start_return');
+    const detailCount = Number(trend.detail_count || 0);
+    const status = item.source_status === 'uploaded' ? (detailCount ? '已计算' : '无可计算轨迹') : tdayStatusLabel(item);
+    setText('#drawerKicker', `${state.platform} · T日 · ${threshold}H趋势入口`);
+    setText('#drawerTitle', row.customer || row.branch || '未命名记录');
+    setText('#drawerParent', `${row.branch || '未标注网点'} · 一级公司 ${row.parent_name || row.branch || '—'}`);
+    $('#drawerSummary').innerHTML = [
+      [`24H待发运`, formatOptionalNumber(row.timeout_24h)],
+      [`36H待发运`, formatOptionalNumber(row.timeout_36h)],
+      ['当前待发运', `${Number(trend.pending_count || 0)}票`],
+      ['始发退回', `${Number(trend.start_return_count || 0)}票`]
+    ].map(([label, value]) => `<div class="summary-tile"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    $('#drawerScoreTrend').hidden = true;
+    $('#drawerScoreTrend').innerHTML = '';
+    $('#drawerHistory').hidden = true;
+    $('#drawerHistory').innerHTML = '';
+    hideDouyinAiAnalysis();
+    clearJdCustomerPeriodAnalysis();
+    chartJobs = [];
+    const panel = $('#drawerCharts');
+    panel.hidden = false;
+    panel.innerHTML = `<div class="tday-trend-head"><div><span>T DAY TREND</span><h3>揽收至发运 / 始发退回时长</h3><p>横轴从 0H；蓝线为截至数据截止时间仍未出现第一条分拨扫描的票数，红线为最新状态“始发退回”且已记录首次异常的票数。24H为预警线，36H为发运标准线。</p></div><strong>${escapeHtml(status)}</strong></div>${pending.length || startReturn.length ? `<div class="tday-trend-scroll"><canvas class="tday-trend-chart" id="tdayTrendChart"></canvas></div><div class="chart-legend tday-trend-legend"><span><i class="pending"></i>待发运票数</span><span><i class="return"></i>始发退回票数</span><span><i class="marker"></i>24H / 36H标准线</span></div><p class="tday-trend-note">时长只使用内网轨迹：第一条揽收时间、第一条分拨扫描时间、第一条异常记录时间；称重记录不参与。数据截止 ${escapeHtml(item.trace_snapshot_at || '—')}。</p>` : `<div class="score-trend-empty">${escapeHtml(item.source_status === 'uploaded' ? '当前记录没有可计算的待发运或始发退回时长。' : (item.error || '数据源未上传。'))}</div>`}`;
+    const canvas = $('#tdayTrendChart');
+    if (canvas) {
+      const allPoints = [...pending, ...startReturn];
+      const maxHour = Math.max(36, ...allPoints.map(point => Number(point.hours || 0)));
+      canvas.style.width = `${Math.max(900, 120 + maxHour * 18)}px`;
+      const draw = () => drawTdayTrendChart(canvas, trend);
+      chartJobs.push({ kind: 'tday', canvas, draw });
+      requestAnimationFrame(draw);
+    }
+    const layer = $('#drawerLayer');
+    layer.classList.add('open');
+    layer.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => $('#closeDrawer').focus(), 60);
+  }
+
   async function openDrawer(branch, mode = "pickup") {
+    if (isTdayActive()) {
+      openTdayBranchDrawer(branch);
+      return;
+    }
     if (mode === 'delivery') {
       if (!data.delivery_monitor) {
         showDrawerLoading(branch, '正在加载派送监控数据');
@@ -1848,6 +2241,15 @@
         console.error(error);
         showToast(state.platform + '网点趋势加载失败，请重试');
         return;
+      }
+    }
+    if (state.platform === '\u6296\u97f3' && !longOrderDataReady()) {
+      showDrawerLoading(branch, '正在加载抖音超长单趋势');
+      try {
+        await ensureLongOrderData();
+      } catch (error) {
+        console.error(error);
+        showToast('超长单量率分片加载失败，当前仅显示可用扣分数据');
       }
     }
     const jd = state.platform === '京东';
@@ -2041,15 +2443,16 @@
   function drawScoreTrendChart(canvas, series, mode) {
     if (!canvas || !canvas.isConnected) return;
     const pickup = mode === 'pickup';
+    const metricMode = pickup || mode === 'long-order';
     const cssWidth = Math.max(320, canvas.clientWidth || 740);
-    const cssHeight = Math.max(pickup ? 250 : 220, canvas.clientHeight || (pickup ? 260 : 228));
+    const cssHeight = Math.max(metricMode ? 250 : 220, canvas.clientHeight || (metricMode ? 260 : 228));
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(cssWidth * ratio);
     canvas.height = Math.round(cssHeight * ratio);
     const context = canvas.getContext('2d');
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, cssWidth, cssHeight);
-    const pad = { top: 25, right: 50, bottom: pickup ? 58 : 42, left: 45 };
+    const pad = { top: 25, right: 50, bottom: metricMode ? 58 : 42, left: 45 };
     const width = cssWidth - pad.left - pad.right;
     const height = cssHeight - pad.top - pad.bottom;
     const slot = width / Math.max(series.length, 1);
@@ -2115,7 +2518,7 @@
       return;
     }
 
-    if (pickup) {
+    if (metricMode) {
       const countMaxRaw = Math.max(1, ...series.map(point => point.shipment_timeout_abnormal_count === null ? 0 : Number(point.shipment_timeout_abnormal_count || 0)));
       const countMax = Math.ceil(countMaxRaw / 5) * 5 || 5;
       const rateMaxRaw = Math.max(1, ...series.map(point => point.shipment_timeout_rate === null ? 0 : Number(point.shipment_timeout_rate || 0)));
@@ -2133,10 +2536,11 @@
         context.textAlign = 'left';
         context.fillText(String(Math.round(rateMax * step / 4)) + '%', pad.left + width + 7, y);
       }
-      const ratePoints = [];
+      const rateSegments = [];
+      let ratePoints = [];
       series.forEach((point, index) => {
         const center = pad.left + slot * index + slot / 2;
-        const count = point.shipment_timeout_abnormal_count === null ? null : Number(point.shipment_timeout_abnormal_count || 0);
+        const count = point.shipment_timeout_abnormal_count === null ? null : Number(point.shipment_timeout_abnormal_count ?? 0);
         if (count !== null && count > 0) {
           const barWidth = Math.min(30, slot * .42);
           const barHeight = count / countMax * height;
@@ -2149,10 +2553,13 @@
           context.textAlign = 'center';
           context.fillText(formatNumber(count), center, Math.max(9, pad.top + height - barHeight - 8));
         }
-        const rate = point.shipment_timeout_rate === null ? null : Number(point.shipment_timeout_rate || 0);
+        const rate = point.shipment_timeout_rate === null ? null : Number(point.shipment_timeout_rate ?? 0);
         if (rate !== null) {
           const current = { x: center, y: pad.top + height - rate / rateMax * height };
           ratePoints.push(current);
+        } else if (ratePoints.length) {
+          rateSegments.push(ratePoints);
+          ratePoints = [];
         }
         context.fillStyle = '#86868b';
         context.textAlign = 'center';
@@ -2167,26 +2574,27 @@
           context.fillText(String(score), center, pad.top + height + 38);
         }
       });
-      if (ratePoints.length) {
+      if (ratePoints.length) rateSegments.push(ratePoints);
+      rateSegments.forEach(segment => {
         context.strokeStyle = '#ff9500';
         context.lineWidth = 2.2;
         context.lineJoin = 'round';
         context.lineCap = 'round';
         context.beginPath();
-        ratePoints.forEach((point, index) => {
+        segment.forEach((point, index) => {
           if (!index) context.moveTo(point.x, point.y);
           else {
-            const previous = ratePoints[index - 1];
+            const previous = segment[index - 1];
             const middle = (previous.x + point.x) / 2;
             context.bezierCurveTo(middle, previous.y, middle, point.y, point.x, point.y);
           }
         });
         context.stroke();
-        ratePoints.forEach(point => {
+        segment.forEach(point => {
           context.fillStyle = '#fff'; context.strokeStyle = '#ff9500'; context.lineWidth = 2;
           context.beginPath(); context.arc(point.x, point.y, 3.6, 0, Math.PI * 2); context.fill(); context.stroke();
         });
-      }
+      });
       context.fillStyle = '#86868b';
       context.textAlign = 'right';
       context.fillText('扣分', pad.left - 7, pad.top + height + 38);
@@ -2232,6 +2640,9 @@
     });
   }
   function renderDailyAnalysis() {
+    const section = document.querySelector('.daily-analysis');
+    if (section) section.hidden = isTdayActive();
+    if (isTdayActive()) return;
     const rows = top10Rows();
     const jd = state.platform === '京东';
     const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';

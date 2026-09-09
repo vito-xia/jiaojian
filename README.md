@@ -8,16 +8,17 @@ AI 或新协作者接手时，请先完整阅读 [`AGENTS.md`](AGENTS.md) 和 [`
 
 1. 将新的 Excel 放入现有 `数据源` 目录，保持文件名和表结构不变。
 2. 首次运行时安装依赖：`python -m pip install -r requirements.txt`
-3. 运行：`python process_data.py`
-4. 双击 `dashboard.html` 查看。
+3. 推荐双击 `更新看板数据.bat` 完成完整同步；命令行运行时可加 `--no-pause`。该入口会依次生成常规 `data/`、扫描 `数据源/超长单/明细/` 生成超长单前1000行副本和 `data/dashboard_long_order.js`，再构建普通静态站点与 Worker 包。
+4. 如只运行 `python process_data.py`，它只生成常规六类数据；需要同步超长单时再运行 `数据源/超长单/脚本/update_long_order.bat --no-pause`。
+5. 双击 `dashboard.html` 查看。
 
-也可以双击 `更新看板数据.bat`。如需指定 T-1 数据日：
+如需指定 T-1 数据日：
 
 ```powershell
 python process_data.py --as-of 2026-07-26
 ```
 
-脚本默认以“①交件超时”中的最大日期作为 T-1，输出到 `data`：五份标准化 JSON、看板聚合 JSON、数据质量报告，以及供本地页面直接读取的 `dashboard_bundle.js`。
+`process_data.py` 默认以“①交件超时”中的最大日期作为 T-1，输出到 `data`：五份标准化 JSON、看板聚合 JSON、数据质量报告，以及供本地页面直接读取的 `dashboard_bundle.js`。超长单脚本默认全量扫描明细文件夹中所有符合 `M月D日.xlsx` 的文件，不提供文件选择器；可用 `--source-dir` 指定其他目录，`--check` 只校验不写入。
 
 ## 已固化口径
 

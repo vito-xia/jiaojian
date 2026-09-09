@@ -194,6 +194,19 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .top10-table.jd-columns .customer-cell { max-width: 156px; }
 .top10-table.jd-columns .metric-number { font-size: 13px; }
 .top10-table.jd-columns .rate { font-size: 10px; white-space: nowrap; }
+.top10-table.tday-columns { min-width: 940px; table-layout: fixed; font-size: 11px; }
+.top10-table.tday-columns th, .top10-table.tday-columns td { padding-left: 8px; padding-right: 8px; }
+.top10-table.tday-columns th:nth-child(1), .top10-table.tday-columns td:nth-child(1) { width: 58px; }
+.top10-table.tday-columns th:nth-child(2), .top10-table.tday-columns td:nth-child(2) { width: 76px; }
+.top10-table.tday-columns th:nth-child(3), .top10-table.tday-columns td:nth-child(3) { width: 205px; }
+.top10-table.tday-columns th:nth-child(4), .top10-table.tday-columns td:nth-child(4) { width: 300px; }
+.top10-table.tday-columns th:nth-child(5), .top10-table.tday-columns td:nth-child(5), .top10-table.tday-columns th:nth-child(6), .top10-table.tday-columns td:nth-child(6) { width: 120px; }
+.top10-table.tday-columns .branch-button, .top10-table.tday-columns .subline { max-width: 190px; }
+.top10-table.tday-columns .customer-cell { max-width: 280px; }
+.tday-metric-button { min-width: 86px; padding: 7px 9px; display: inline-flex; align-items: baseline; justify-content: center; gap: 5px; border: 1px solid rgba(0,113,227,.14); border-radius: 10px; color: var(--blue); background: #f3f8ff; cursor: pointer; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; transition: background .18s, border-color .18s, transform .18s; }
+.tday-metric-button span { color: var(--quiet); font-size: 8px; font-weight: 650; }
+.tday-metric-button:hover { border-color: rgba(0,113,227,.35); background: #eaf4ff; transform: translateY(-1px); }
+.tday-metric-button:active { transform: translateY(0); }
 .customer-name { display: block; overflow: hidden; color: var(--ink); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .inline-tags { margin-top: 5px; display: flex; gap: 5px; }
 .micro-tag { padding: 2px 6px; border-radius: 5px; color: var(--muted); background: #f1f1f3; font-size: 8px; }
@@ -458,6 +471,24 @@ footer { padding: 0 6px; display: flex; justify-content: space-between; color: v
 .chart-stat { flex: 0 0 auto; text-align: right; }.chart-stat strong { display: block; font-size: 19px; }.chart-stat span { color: var(--quiet); font-size: 8px; }
 .combo-chart { width: 100%; height: 228px; margin-top: 14px; display: block; }
 .chart-legend { display: flex; gap: 15px; margin: 4px 0 0; color: var(--quiet); font-size: 8px; }.chart-legend span { display: inline-flex; align-items: center; gap: 5px; }.chart-legend i { width: 12px; height: 5px; border-radius: 3px; background: linear-gradient(90deg,#2997ff,#0071e3); }.chart-legend i.line { height: 2px; background: var(--amber); }
+.tday-branch-row { margin-bottom: 10px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.tday-branch-row > div:first-child { min-width: 0; }
+.tday-branch-row strong { display: block; overflow: hidden; color: var(--ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.tday-branch-row small { display: block; margin-top: 4px; color: var(--quiet); font-size: 9px; }
+.tday-branch-metrics { flex: 0 0 auto; display: flex; gap: 8px; }
+.tday-trend-head { margin: 5px 0 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.tday-trend-head > div { min-width: 0; }
+.tday-trend-head > div > span { color: var(--blue); font-size: 8px; font-weight: 740; letter-spacing: .11em; }
+.tday-trend-head h3 { margin: 5px 0 0; font-size: 17px; }
+.tday-trend-head p { margin: 6px 0 0; color: var(--quiet); font-size: 9px; line-height: 1.55; }
+.tday-trend-head > strong { flex: 0 0 auto; padding: 6px 9px; border-radius: 9px; color: var(--blue); background: #eaf4ff; font-size: 9px; font-weight: 680; }
+.tday-trend-scroll { width: 100%; overflow-x: auto; padding-bottom: 5px; scrollbar-width: thin; scrollbar-color: #d1d1d6 transparent; }
+.tday-trend-chart { min-width: 740px; height: 286px; display: block; }
+.tday-trend-legend { margin-top: 0; }
+.tday-trend-legend i.pending { background: var(--blue); }
+.tday-trend-legend i.return { background: #ff3b30; }
+.tday-trend-legend i.marker { width: 12px; height: 2px; border-radius: 0; background: repeating-linear-gradient(90deg, #8e8e93 0 4px, transparent 4px 7px); }
+.tday-trend-note { margin: 9px 0 0; color: var(--quiet); font-size: 9px; line-height: 1.55; }
 .drawer-empty { padding: 60px 20px; color: var(--quiet); text-align: center; font-size: 13px; }
 
 .toast { position: fixed; z-index: 200; left: 50%; bottom: 24px; padding: 10px 14px; border-radius: 11px; color: #fff; background: rgba(30,30,32,.91); box-shadow: 0 8px 25px rgba(0,0,0,.2); font-size: 11px; opacity: 0; pointer-events: none; transform: translate(-50%, 10px); transition: opacity .2s, transform .2s; }.toast.show { opacity: 1; transform: translate(-50%,0); }
@@ -592,4 +623,11 @@ footer { padding: 0 6px; display: flex; justify-content: space-between; color: v
 @media (max-width: 760px) {
   .jd-control-rule { align-items: flex-start; flex-direction: column; gap: 4px; }
   .jd-control-rule small { margin-left: 0; }
+}
+@media (max-width: 760px) {
+  .tday-branch-row { align-items: flex-start; flex-direction: column; }
+  .tday-branch-metrics { width: 100%; }
+  .tday-branch-metrics .tday-metric-button { flex: 1; }
+  .tday-trend-head { align-items: flex-start; flex-direction: column; }
+  .tday-trend-head > strong { align-self: flex-start; }
 }

@@ -47,6 +47,7 @@
 | 派送积分或派送管控 | `7.7`、`12` | `process_data.py`、`dashboard.html`、`assets/dashboard.js` |
 | 页面布局、列宽、响应式、视觉 | `8`、`10.3` | `dashboard.html`、`assets/dashboard.css`、`assets/dashboard.js` |
 | 数据源或字段变化 | `5`、`6`、`10.2` | `process_data.py`、对应 Excel 表结构 |
+| T 日临时监控、下载或分拨趋势 | `5.3`、`6.3`、`7.1`、`7.2`、`8`、`9.3.1` | `下载T日数据.py`、`更新T日数据.py`、`assets/dashboard-loader.js`、`assets/dashboard.js`、`assets/dashboard.css` |
 | 数据更新 | `5`、`6`、`9`、`10` | `process_data.py`、`数据源/`、`data_quality_report.json` |
 | 加载性能或数据分片 | `6.3`、`8` | `assets/dashboard-loader.js`、`assets/dashboard.js`、`process_data.py` |
 | 构建或发布 | `3.1`、`9`、`11` | `build.mjs`、`package.json`、`site-deploy/` |
