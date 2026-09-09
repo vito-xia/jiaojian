@@ -15,7 +15,9 @@
     'drawer-douyin': 'dashboard_drawer_douyin.js',
     'drawer-taobao': 'dashboard_drawer_taobao.js',
     'drawer-jd': 'dashboard_drawer_jd.js',
-    'drawer-kuaishou': 'dashboard_drawer_kuaishou.js'
+    'drawer-kuaishou': 'dashboard_drawer_kuaishou.js',
+    tday: 'dashboard_tday.js',
+    'long-order': 'dashboard_long_order.js'
   });
   const mergeMaps = new Set(['platforms', 'trends', 'branch_top5_data']);
 
@@ -39,6 +41,11 @@
     return String(data.meta?.asset_version || data.meta?.as_of || '1').replace(/[^0-9A-Za-z_-]/g, '');
   }
 
+  function chunkVersion(name) {
+    // T 日分片可能在同一天多次更新，页面刷新时强制重新读取当天快照。
+    return ['tday', 'long-order'].includes(name) ? `${assetVersion()}-${Date.now()}` : assetVersion();
+  }
+
   function load(name) {
     if (!paths[name]) return Promise.reject(new Error('Unknown dashboard data chunk: ' + name));
     if (loaded.has(name)) return Promise.resolve(data);
@@ -52,7 +59,7 @@
     const promise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.async = true;
-      script.src = 'data/' + paths[name] + '?v=' + encodeURIComponent(assetVersion());
+      script.src = 'data/' + paths[name] + '?v=' + encodeURIComponent(chunkVersion(name));
       script.onload = () => {
         const payload = registry[name];
         if (!payload) {
