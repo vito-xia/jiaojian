@@ -5,4 +5,7 @@ __pycache__/
 *.tmp
 .tmp-edge-profile*/
 *.xlsx
-数据源/
+数据源/*
+!数据源/*.bat
+!数据源/脚本/
+!数据源/脚本/**

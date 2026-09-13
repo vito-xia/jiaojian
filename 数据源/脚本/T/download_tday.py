@@ -132,7 +132,7 @@ def install_snapshot(staging: Path, destination: Path, manifest: dict[str, Any])
 
 
 def main() -> int:
-    base_dir = Path(__file__).resolve().parent
+    base_dir = Path(__file__).resolve().parents[3]
     data_source_dir = base_dir / "数据源"
     manual_source_dir = data_source_dir / "数据源-手动更新"
     parser = argparse.ArgumentParser(description="按链接清单下载 T 日源文件")

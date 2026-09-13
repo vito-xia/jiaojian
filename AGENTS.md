@@ -33,7 +33,7 @@
 - 必须区分真实数值 0 与空值。0 分、0 票、0% 不能被转换为 `—`；缺失值不能被伪造成 0。
 - 不得顺手修复 `项目交接文档.md` 中标记为“待确认”或“待授权”的事项。
 - 不修改 `数据源/数据源-手动更新/交件链接清单T-1日.txt` 或 `数据源/数据源-手动更新/交件链接清单T日.txt` 中的访问地址，不在输出中暴露可能带权限的链接。
-- 不使用 `_dl_and_process.py`；它是已停用的一次性历史脚本。
+- 已停用的一次性 `_dl_and_process.py` 已从仓库移除，不得恢复为更新入口。
 - 未经用户明确要求，不提交、不推送 Git，不发布项目，也不修改外部部署状态。
 
 ## 4. 按任务最小读取范围
@@ -47,7 +47,7 @@
 | 派送积分或派送管控 | `7.7`、`12` | `process_data.py`、`dashboard.html`、`assets/dashboard.js` |
 | 页面布局、列宽、响应式、视觉 | `8`、`10.3` | `dashboard.html`、`assets/dashboard.css`、`assets/dashboard.js` |
 | 数据源或字段变化 | `5`、`6`、`10.2` | `process_data.py`、对应 Excel 表结构 |
-| T 日临时监控、下载或分拨趋势 | `5.3`、`6.3`、`7.1`、`7.2`、`8`、`9.3.1` | `下载T日数据.py`、`更新T日数据.py`、`assets/dashboard-loader.js`、`assets/dashboard.js`、`assets/dashboard.css` |
+| T 日临时监控、下载或分拨趋势 | `5.3`、`6.3`、`7.1`、`7.2`、`8`、`9.3.1` | `数据源/脚本/T/download_tday.py`、`数据源/脚本/T/update_tday.py`、`assets/dashboard-loader.js`、`assets/dashboard.js`、`assets/dashboard.css` |
 | 数据更新 | `5`、`6`、`9`、`10` | `process_data.py`、`数据源/`、`data_quality_report.json` |
 | 加载性能或数据分片 | `6.3`、`8` | `assets/dashboard-loader.js`、`assets/dashboard.js`、`process_data.py` |
 | 构建或发布 | `3.1`、`9`、`11` | `build.mjs`、`package.json`、`site-deploy/` |

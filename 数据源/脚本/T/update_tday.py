@@ -12,6 +12,7 @@ import hashlib
 import math
 import re
 import shutil
+import sys
 import tempfile
 import urllib.request
 from collections import Counter, defaultdict
@@ -22,6 +23,9 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 from openpyxl.utils.datetime import from_excel
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from process_data import customer_is_excluded, parent_of, province_of, read_mapping, text, write_js_payload
 
@@ -1173,7 +1177,7 @@ def tday_source_freshness(link_file: Path, trace_file: Path) -> list[str]:
 
 
 def main() -> int:
-    base_dir = Path(__file__).resolve().parent
+    base_dir = PROJECT_ROOT
     data_source_dir = base_dir / "数据源"
     manual_source_dir = data_source_dir / "数据源-手动更新"
     parser = argparse.ArgumentParser(description="生成当天抖音/淘宝 T 日监控数据")
