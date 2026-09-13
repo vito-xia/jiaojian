@@ -133,9 +133,11 @@ def install_snapshot(staging: Path, destination: Path, manifest: dict[str, Any])
 
 def main() -> int:
     base_dir = Path(__file__).resolve().parent
+    data_source_dir = base_dir / "数据源"
+    manual_source_dir = data_source_dir / "数据源-手动更新"
     parser = argparse.ArgumentParser(description="按链接清单下载 T 日源文件")
-    parser.add_argument("--link-file", type=Path, default=base_dir / "数据源" / "链接清单T日.txt")
-    parser.add_argument("--destination", type=Path, default=base_dir / "数据源" / "T日监控" / "下载内容")
+    parser.add_argument("--link-file", type=Path, default=manual_source_dir / "交件链接清单T日.txt")
+    parser.add_argument("--destination", type=Path, default=data_source_dir / "脚本处理后输出" / "交件T脚本处理后")
     parser.add_argument("--date", help="记录到清单中的目标日期，不过滤链接")
     args = parser.parse_args()
 

@@ -1156,25 +1156,49 @@ def parse_target_day(raw: str | None) -> date:
         raise ValueError("--date 必须使用 YYYY-MM-DD") from error
 
 
-def main() -> None:
+def tday_source_freshness(link_file: Path, trace_file: Path) -> list[str]:
+    reasons: list[str] = []
+    for label, path in (("T日链接清单", link_file), ("T日内网轨迹", trace_file)):
+        if not path.is_file():
+            reasons.append(f"{label}不存在：{path}")
+            continue
+        try:
+            modified = datetime.fromtimestamp(path.stat().st_mtime).date()
+        except OSError:
+            reasons.append(f"{label}无法读取修改日期：{path}")
+            continue
+        if modified != date.today():
+            reasons.append(f"{label}最新修改日期为 {modified.isoformat()}，不是今天 {date.today().isoformat()}")
+    return reasons
+
+
+def main() -> int:
     base_dir = Path(__file__).resolve().parent
+    data_source_dir = base_dir / "数据源"
+    manual_source_dir = data_source_dir / "数据源-手动更新"
     parser = argparse.ArgumentParser(description="生成当天抖音/淘宝 T 日监控数据")
-    parser.add_argument("--link-file", type=Path, default=base_dir / "数据源" / "链接清单T日.txt")
-    parser.add_argument("--source-dir", type=Path, default=base_dir / "数据源" / "T日监控" / "下载内容")
-    parser.add_argument("--trace-file", type=Path, default=base_dir / "数据源" / "T日监控" / "内网轨迹" / "T日内网轨迹.xlsx")
+    parser.add_argument("--link-file", type=Path, default=manual_source_dir / "交件链接清单T日.txt")
+    parser.add_argument("--source-dir", type=Path, default=data_source_dir / "脚本处理后输出" / "交件T脚本处理后")
+    parser.add_argument("--trace-file", type=Path, default=manual_source_dir / "T日内网轨迹.xlsx")
     parser.add_argument("--output", type=Path, default=base_dir / "data" / "dashboard_tday.js")
     parser.add_argument("--date", help="目标 T 日，默认使用本机当天日期")
     parser.add_argument("--download", action="store_true", help="兼容参数：不再在此脚本下载，请先运行独立下载脚本")
     parser.add_argument("--no-download", action="store_true", help="兼容参数：只处理本地内网轨迹（默认行为）")
     args = parser.parse_args()
+    freshness_reasons = tday_source_freshness(args.link_file, args.trace_file)
+    if freshness_reasons:
+        print("T 日数据跳过更新：")
+        for reason in freshness_reasons:
+            print(f"- {reason}")
+        return 0
     target_day = parse_target_day(args.date)
     args.source_dir.mkdir(parents=True, exist_ok=True)
 
     warnings: list[str] = []
     if args.download:
-        warnings.append("下载已拆分为独立脚本，请先运行数据源/T日监控/脚本/下载T日数据.bat")
+        warnings.append("下载已拆分为独立脚本，请先运行数据源/下载T日数据.bat")
     try:
-        mapping = read_mapping(base_dir / "数据源")
+        mapping = read_mapping(manual_source_dir)
     except Exception:
         mapping = {}
     payload = build_payload(args.source_dir, target_day, mapping, {}, args.trace_file)
@@ -1188,7 +1212,8 @@ def main() -> None:
         item = payload["platforms"][platform]
         kpis = item.get("kpis", {})
         print(f"{platform}：内网轨迹 {item['source_status']} · {len(item['rows'])} 条展示 · 待发运 {kpis.get('pending_count', 0)} · 始发退回 {kpis.get('start_return_count', 0)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

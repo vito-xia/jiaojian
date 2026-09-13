@@ -23,9 +23,8 @@ goto failure
 
 :long_order_ready
 set "FAILURE_STAGE=long-order trend generation"
-set "LONG_ORDER_BAT="
-for /r "%~dp0" %%F in (update_long_order.bat) do if exist "%%~fF" if not defined LONG_ORDER_BAT set "LONG_ORDER_BAT=%%~fF"
-if defined LONG_ORDER_BAT goto long_order_run
+set "LONG_ORDER_BAT=%~dp0数据源\脚本\超长单\update_long_order.bat"
+if exist "%LONG_ORDER_BAT%" goto long_order_run
 set "FAILURE_STAGE=long-order script missing"
 goto failure
 

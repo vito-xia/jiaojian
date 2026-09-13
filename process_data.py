@@ -480,10 +480,10 @@ def locate(data_dir: Path, prefix: str) -> Path:
     return matches[0]
 
 
-def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
+def read_timeout(timeout_dir: Path, year: int) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     platform_pattern = "|".join(re.escape(platform) for platform in PLATFORMS)
-    for path in sorted((data_dir / "①交件超时").glob("*.xlsx")):
+    for path in sorted(timeout_dir.glob("*.xlsx")):
         match = re.match(rf"({platform_pattern})_(\d{{1,2}})月(\d{{1,2}})日\.xlsx$", path.name)
         if not match or path.name.startswith("~$"):
             continue
@@ -521,6 +521,24 @@ def read_timeout(data_dir: Path, year: int) -> list[dict[str, Any]]:
             records.append(record)
         workbook.close()
     return records
+
+
+def resolve_source_layout(data_dir: Path) -> tuple[Path, Path]:
+    """Resolve the timeout-output and manually maintained source directories.
+
+    The current handoff layout separates downloaded/processed files from the
+    manually maintained workbooks.  Keep the former layout as a fallback so
+    command-line users with an older checkout can still run the processor.
+    """
+    current_timeout_dir = data_dir / "脚本处理后输出" / "交件T-1脚本处理后"
+    current_manual_dir = data_dir / "数据源-手动更新"
+    if current_timeout_dir.exists() or current_manual_dir.exists():
+        if not current_timeout_dir.is_dir():
+            raise FileNotFoundError(f"未找到 T-1 交件处理后目录：{current_timeout_dir}")
+        if not current_manual_dir.is_dir():
+            raise FileNotFoundError(f"未找到手动维护数据源目录：{current_manual_dir}")
+        return current_timeout_dir, current_manual_dir
+    return data_dir / "①交件超时", data_dir
 
 
 def read_top5(data_dir: Path, year: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
@@ -1230,14 +1248,17 @@ def main() -> None:
     parser.add_argument("--year", type=int, default=datetime.now().year)
     args = parser.parse_args()
     print("读取 6 类数据源…")
-    timeout_rows = read_timeout(args.data_dir, args.year)
+    timeout_dir, manual_dir = resolve_source_layout(args.data_dir)
+    print(f"T-1交件目录：{timeout_dir}")
+    print(f"手动维护目录：{manual_dir}")
+    timeout_rows = read_timeout(timeout_dir, args.year)
     if not timeout_rows:
         raise RuntimeError("未读取到交件超时数据")
-    top5, branch_top5_rows, bad_dates = read_top5(args.data_dir, args.year)
-    mapping = read_mapping(args.data_dir)
-    score_rows, daily_scores, cumulative_scores = read_scores(args.data_dir)
-    controls = read_controls(args.data_dir)
-    delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, delivery_score_headers = read_delivery_monitor(args.data_dir)
+    top5, branch_top5_rows, bad_dates = read_top5(manual_dir, args.year)
+    mapping = read_mapping(manual_dir)
+    score_rows, daily_scores, cumulative_scores = read_scores(manual_dir)
+    controls = read_controls(manual_dir)
+    delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, delivery_score_headers = read_delivery_monitor(manual_dir)
     as_of = args.as_of or max(row["date"] for row in timeout_rows)
     if as_of not in {row["date"] for row in timeout_rows}:
         raise ValueError(f"--as-of {as_of} 不在交件数据日期中")
