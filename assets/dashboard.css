@@ -269,7 +269,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .score-track .track { flex: 1; height: 5px; overflow: hidden; border-radius: 4px; background: #e8e8ed; }
 .score-track .fill { display: block; height: 100%; border-radius: inherit; background: var(--amber); }
 .score-track .fill.clear { background: var(--red); }
-.score-table { min-width: 1180px; }
+.score-table { min-width: 1310px; }
 .score-table th:first-child, .score-table td:first-child { padding-left: 16px; }
 .score-table .province-cell { width: 56px; max-width: 56px; }
 .score-table .province-label { max-width: 56px; }

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=26">
+  <link rel="stylesheet" href="assets/dashboard.css?v=27">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -124,7 +124,7 @@
           </div>
           <div class="table-scroll compact-scroll">
             <table class="data-table compact-table score-table">
-              <thead><tr><th>省区</th><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
+              <thead><tr><th>省区</th><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th title="所选日期及之前共 15 个自然日；只计入超长单异常运单数有数值的日期，真实 0 计入">近期超长单量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
               <tbody id="scoreBody"></tbody>
             </table>
           </div>
@@ -364,6 +364,6 @@
   <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=18"></script>
   <script src="assets/dashboard-loader.js?v=3"></script>
-  <script src="assets/dashboard.js?v=33"></script>
+  <script src="assets/dashboard.js?v=34"></script>
 </body>
 </html>

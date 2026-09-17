@@ -22,6 +22,11 @@ set "FAILURE_STAGE=standard data chunk missing"
 goto failure
 
 :long_order_ready
+if exist "data\抖音高停滞积分网点.xlsx" goto excel_ready
+set "FAILURE_STAGE=high-score Excel missing"
+goto failure
+
+:excel_ready
 set "FAILURE_STAGE=long-order trend generation"
 set "LONG_ORDER_BAT=%~dp0数据源\脚本\超长单\update_long_order.bat"
 if exist "%LONG_ORDER_BAT%" goto long_order_run
@@ -62,7 +67,7 @@ goto pause_or_exit
 :success
 if "%PUSHD_OK%"=="1" popd
 echo.
-echo Data update, long-order trend sync, and static build completed. T-1 is synchronized across root, dist, and worker assets.
+echo Data update, high-score Excel export, long-order trend sync, and static build completed. T-1 is synchronized across root, dist, and worker assets.
 set "EXIT_CODE=0"
 
 :pause_or_exit

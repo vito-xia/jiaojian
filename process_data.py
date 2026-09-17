@@ -16,8 +16,10 @@ from typing import Any
 from xml.etree import ElementTree
 from zipfile import ZipFile
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils.datetime import from_excel
+from 数据源.脚本.超长单.update_long_order import collect_records
 
 PLATFORM_ALIAS = {"淘天": "淘宝"}
 PLATFORMS = ("抖音", "淘宝", "京东", "快手")
@@ -905,6 +907,88 @@ def build_pickup_deduction_calculator(score_rows: list[dict[str, Any]], window_d
     return summarize
 
 
+def build_long_order_daily_counts(records: list[dict[str, Any]]) -> dict[str, dict[str, int | float | None]]:
+    daily: dict[str, dict[str, int | float | None]] = defaultdict(dict)
+    for record in records:
+        day = record["date"]
+        for branch, point in record["branch_rows"].items():
+            daily[branch][day] = point["abnormal_count"]
+    return dict(daily)
+
+
+def build_long_order_volume_calculator(daily_counts: dict[str, dict[str, int | float | None]], window_days: int = 15):
+    cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def summarize(branch: str, end_day: str) -> dict[str, Any]:
+        key = (branch, end_day)
+        if key not in cache:
+            end = iso_day(end_day)
+            start = end - timedelta(days=window_days - 1)
+            values = [
+                count for day, count in daily_counts.get(branch, {}).items()
+                if start <= iso_day(day) <= end and count is not None
+            ]
+            average = round(sum(values) / len(values), 2) if values else None
+            cache[key] = {
+                "level": deduction_volume_level(average) if average is not None else "—",
+                "average": average,
+                "days": len(values),
+            }
+        return cache[key]
+
+    return summarize
+
+
+def build_deduction_customer_index(
+    timeout_rows: list[dict[str, Any]],
+    customer_metadata: dict[str, dict[tuple[str, ...], tuple[str, int, str]]],
+) -> dict[str, dict[str, dict[tuple[str, str], set[str]]]]:
+    index: dict[str, dict[str, dict[tuple[str, str], set[str]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
+    for row in timeout_rows:
+        if row["platform"] != "抖音" or number(row.get("timeout_36h")) <= 0:
+            continue
+        code = latest_customer_code(row, customer_metadata)
+        customer_key = ("code", code) if code else ("name", row["customer"])
+        name_key = (row["platform"], row["branch"], row["customer"])
+        values = [customer_metadata["fallback_by_name"].get(name_key)]
+        if code:
+            values.append(customer_metadata["fallback_by_code"].get((row["platform"], code)))
+        available = [value for value in values if value is not None]
+        fallback = max(available, key=lambda value: (value[0], value[1]))[2] if available else text(row.get("has_shipping_fallback"))
+        index[row["branch"]][row["date"]][customer_key].add(fallback)
+    return index
+
+
+def attributed_deduction_fallback(
+    branch: str,
+    score_day: str,
+    scenes: set[str],
+    customer_index: dict[str, dict[str, dict[tuple[str, str], set[str]]]],
+) -> str:
+    if not score_day or not scenes:
+        return "-"
+    day = iso_day(score_day)
+    resolved: list[tuple[tuple[str, str], set[str]]] = []
+    for scene in sorted(scenes):
+        if scene == PICKUP_SCORE_SCENE:
+            candidate_days = [score_day]
+        elif scene == LONG_ORDER_SCORE_SCENE:
+            candidate_days = [(day - timedelta(days=lag)).isoformat() for lag in (1, 2, 3)]
+        else:
+            continue
+        candidates: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for candidate_day in candidate_days:
+            for customer, statuses in customer_index.get(branch, {}).get(candidate_day, {}).items():
+                candidates[customer].update(statuses)
+        if len(candidates) != 1:
+            return "-"
+        resolved.append(next(iter(candidates.items())))
+    if len(resolved) != len(scenes) or len({customer for customer, _ in resolved}) != 1:
+        return "-"
+    statuses = set().union(*(values for _, values in resolved))
+    return next(iter(statuses)) if len(statuses) == 1 and statuses <= {"是", "否"} else "-"
+
+
 def build_extreme_records(score_rows: list[dict[str, Any]], mapping: dict[str, dict[str, str]], limit: int = 20) -> list[dict[str, Any]]:
     records = []
     for row in score_rows:
@@ -1082,13 +1166,14 @@ def build_branch_score_trends(score_rows: list[dict[str, Any]]) -> dict[str, dic
     return result
 
 
-def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, as_of: str, bad_top5_dates: int):
+def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of: str, bad_top5_dates: int):
     raw_timeout_count = len(timeout_rows)
     raw_top5_count = len(top5)
     timeout_rows = [row for row in timeout_rows if not customer_is_excluded(row["customer"])]
     top5 = [row for row in top5 if not customer_is_excluded(row["customer"])]
     branch_top5_rows = [row for row in branch_top5_rows if not customer_is_excluded(row["customer"])]
     customer_metadata = build_latest_customer_metadata(timeout_rows)
+    deduction_customers = build_deduction_customer_index(timeout_rows, customer_metadata)
     excluded_timeout_count = raw_timeout_count - len(timeout_rows)
     excluded_top5_count = raw_top5_count - len(top5)
     dates_by_platform = {p: sorted({r["date"] for r in timeout_rows if r["platform"] == p}) for p in PLATFORMS}
@@ -1102,6 +1187,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     current_controls, merchant_counts, parent_clear, branch_clear_counts, clearouts = build_control_index(controls, mapping, control_as_of)
     rolling_score = build_score_calculator(daily_scores)
     pickup_deduction = build_pickup_deduction_calculator(score_rows)
+    long_order_volume = build_long_order_volume_calculator(long_order_daily_counts)
     extreme_records = build_extreme_records(score_rows, mapping)
     delivery_monitor = build_delivery_monitor(delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, mapping)
     top10_by_date = {p: {} for p in PLATFORMS}
@@ -1171,12 +1257,16 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             previous_day = (iso_day(day) - timedelta(days=1)).isoformat()
             two_days_prior = (iso_day(day) - timedelta(days=2)).isoformat()
             deduction = pickup_deduction(branch, day)
+            long_order = long_order_volume(branch, day)
             latest_dates = [date for date in score_rows_by_branch_date.get(branch, {}) if date <= day]
             latest_score_date = max(latest_dates, default="")
             latest_rows = score_rows_by_branch_date.get(branch, {}).get(latest_score_date, [])
             pickup_rows = [row for row in latest_rows if row["scene"] == PICKUP_SCORE_SCENE]
+            latest_scenes = {row["scene"] for row in latest_rows}
             timeout_counts = [row["shipment_timeout_abnormal_count"] for row in pickup_rows if row.get("shipment_timeout_abnormal_count") is not None]
             latest_timeout_count = sum(timeout_counts) if timeout_counts else None
+            latest_long_order_count = long_order_daily_counts.get(branch, {}).get(latest_score_date) if LONG_ORDER_SCORE_SCENE in latest_scenes else None
+            latest_deduction_volume = latest_timeout_count if latest_timeout_count is not None else latest_long_order_count
             rate_rows = [row for row in pickup_rows if row.get("shipment_timeout_rate") is not None]
             if len(rate_rows) == 1:
                 latest_timeout_rate = rate_rows[0]["shipment_timeout_rate"]
@@ -1194,9 +1284,12 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
                 "is_new": rolling_score(branch, previous_day) < 6 or rolling_score(branch, two_days_prior) < 6,
                 "deduction_level": deduction["level"], "deduction_average": deduction["average"],
                 "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],
+                "long_order_level": long_order["level"], "long_order_average": long_order["average"], "long_order_days": long_order["days"],
                 "latest_score_date": latest_score_date,
                 "latest_timeout_count": latest_timeout_count,
                 "latest_timeout_rate": latest_timeout_rate,
+                "latest_deduction_volume": latest_deduction_volume,
+                "deduction_fallback": attributed_deduction_fallback(branch, latest_score_date, latest_scenes, deduction_customers),
                 "clearout_count": clear["count"], "last_clearout_date": clear["last_date"], "last_clearout_type": clear["last_type"]})
         high.sort(key=lambda r: (-r["stagnant_score"], -r["clearout_count"], r["branch"]))
         high_scores_by_date[day] = high
@@ -1240,6 +1333,95 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     }
 
 
+def excel_volume_text(value: int | float) -> str:
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
+def excel_level_text(level: str, average: int | float | None, days: int) -> str:
+    if average is None:
+        return level or "—"
+    return f"{level}\n日均 {excel_volume_text(average)} 票 · {days}天"
+
+
+def deduction_date_label(board_day: str, score_day: str) -> str:
+    if score_day == board_day:
+        return "T-1"
+    if score_day == (iso_day(board_day) - timedelta(days=1)).isoformat():
+        return "T-2"
+    return "其他"
+
+
+def write_high_score_excel(path: Path, dashboard: dict[str, Any]) -> int:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "高停滞积分网点"
+    sheet.sheet_view.showGridLines = False
+    sheet.freeze_panes = "D2"
+    headers = [
+        "看板日期", "扣分日期标记", "管控网点", "当前积分", "扣分交件量级",
+        "近期超长单量级", "是否发运兜底", "历史清退次数", "最近扣分日", "最近扣分日单量",
+    ]
+    sheet.append(headers)
+    header_fill = PatternFill("solid", fgColor="183153")
+    for cell in sheet[1]:
+        cell.fill = header_fill
+        cell.font = Font(name="微软雅黑", size=10, bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.row_dimensions[1].height = 32
+    widths = (14, 15, 38, 12, 24, 24, 16, 16, 14, 20)
+    for column, width in enumerate(widths, 1):
+        sheet.column_dimensions[sheet.cell(1, column).column_letter].width = width
+
+    row_count = 0
+    dates = dashboard["platforms"]["抖音"]["dates"]
+    for board_day in reversed(dates):
+        rows = dashboard["high_scores_by_date"].get(board_day, [])
+        ordered = sorted(rows, key=lambda row: (
+            row.get("latest_deduction_volume") is None,
+            -number(row.get("latest_deduction_volume")),
+            -number(row.get("stagnant_score")),
+            row["branch"],
+        ))
+        for row in ordered:
+            score_day = row.get("latest_score_date") or ""
+            sheet.append([
+                iso_day(board_day), deduction_date_label(board_day, score_day), row["branch"],
+                row["stagnant_score"],
+                excel_level_text(row["deduction_level"], row["deduction_average"], row["deduction_days"]),
+                excel_level_text(row["long_order_level"], row["long_order_average"], row["long_order_days"]),
+                row.get("deduction_fallback") or "-", row["clearout_count"],
+                iso_day(score_day) if score_day else None, row.get("latest_deduction_volume"),
+            ])
+            row_count += 1
+            sheet.row_dimensions[row_count + 1].height = 38
+            for cell in sheet[row_count + 1]:
+                cell.font = Font(name="微软雅黑", size=10, color="24364A")
+                cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+            for column in (3, 5, 6):
+                sheet.cell(row_count + 1, column).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+            for column in (1, 9):
+                sheet.cell(row_count + 1, column).number_format = "yyyy-mm-dd"
+            for column in (4, 8, 10):
+                sheet.cell(row_count + 1, column).number_format = "#,##0.##"
+            marker = sheet.cell(row_count + 1, 2)
+            if marker.value == "T-1":
+                marker.fill = PatternFill("solid", fgColor="FCE8E6")
+            elif marker.value == "T-2":
+                marker.fill = PatternFill("solid", fgColor="FFF3D6")
+            for column in (2, 3, 5, 6, 7):
+                sheet.cell(row_count + 1, column).data_type = "s"
+    sheet.auto_filter.ref = f"A1:J{row_count + 1}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        workbook.save(temporary)
+        temporary.replace(path)
+    finally:
+        workbook.close()
+        temporary.unlink(missing_ok=True)
+    return row_count
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成交件超时静态看板数据")
     parser.add_argument("--data-dir", type=Path, default=Path(__file__).resolve().parent / "数据源")
@@ -1262,8 +1444,18 @@ def main() -> None:
     as_of = args.as_of or max(row["date"] for row in timeout_rows)
     if as_of not in {row["date"] for row in timeout_rows}:
         raise ValueError(f"--as-of {as_of} 不在交件数据日期中")
-    dashboard = build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, as_of, bad_dates)
+    long_order_source_dir = manual_dir / "超长单-手动更新"
+    long_order_processed_dir = args.data_dir / "脚本处理后输出" / "超长单-脚本处理后"
+    long_order_records = collect_records(long_order_source_dir, long_order_processed_dir, args.year) if long_order_source_dir.is_dir() else []
+    long_order_daily_counts = build_long_order_daily_counts(long_order_records)
+    dashboard = build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of, bad_dates)
     dashboard["delivery_monitor"]["score_headers"] = delivery_score_headers
+    dashboard["meta"]["long_order_source"] = {
+        "file_count": len(long_order_records),
+        "latest_date": long_order_records[-1]["date"] if long_order_records else "",
+        "branch_day_rows": sum(len(record["branch_rows"]) for record in long_order_records),
+        "row_limit": 1000,
+    }
     output = args.output_dir
     write_json(output / "timeout_daily.json", timeout_rows)
     write_json(output / "top5_control.json", top5)
@@ -1313,8 +1505,10 @@ def main() -> None:
         (output / filename).unlink(missing_ok=True)
     for chunk_name, (filename, payload) in generated_chunks.items():
         write_js_payload(output / filename, payload, chunk_name=chunk_name)
+    excel_rows = write_high_score_excel(output / "抖音高停滞积分网点.xlsx", dashboard)
     print(f"完成：T-1={as_of}，交件 {len(timeout_rows)} 条，TOP5 {len(top5)} 条，交件积分 {len(score_rows)} 条，交件管控 {len(controls)} 条，派送积分 {len(delivery_score_rows)} 条，派送管控 {len(delivery_controls)} 条")
     print(f"输出：{output.resolve()}")
+    print(f"高停滞积分 Excel：{excel_rows} 行，{(output / '抖音高停滞积分网点.xlsx').resolve()}")
     check = dashboard["meta"]["example_check"]
     print("示例核验：广东佛山南海新河村公司 / 抖音", check.get("months", []), check.get("branches", []))
 

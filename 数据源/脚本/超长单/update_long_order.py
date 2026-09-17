@@ -324,14 +324,8 @@ def write_manifest(path: Path, records: list[dict[str, Any]], generated_at: str,
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
-def run(args: argparse.Namespace) -> int:
-    project_root = project_root_from_script()
-    data_source_dir = project_root / "数据源"
-    source_dir = args.source_dir or data_source_dir / "数据源-手动更新" / "超长单-手动更新"
-    processed_dir = args.processed_dir or data_source_dir / "脚本处理后输出" / "超长单-脚本处理后"
-    output_path = args.output or project_root / "data" / "dashboard_long_order.js"
-    year = args.year or default_year(project_root)
-    row_limit = DATA_ROW_LIMIT
+def collect_records(source_dir: Path, processed_dir: Path, year: int, row_limit: int = DATA_ROW_LIMIT) -> list[dict[str, Any]]:
+    """Read current files plus retained history, preferring the current file for duplicate dates."""
     pairs = source_files(source_dir, year)
     current_records = [read_one_source(day, path, row_limit) for day, path in pairs]
     current_dates = {record["date"] for record in current_records}
@@ -346,7 +340,19 @@ def run(args: argparse.Namespace) -> int:
             if day not in current_dates
         ]
         history_records = [read_one_source(day, path, row_limit) for day, path in history_pairs]
-    records = sorted(history_records + current_records, key=lambda record: record["date"])
+    return sorted(history_records + current_records, key=lambda record: record["date"])
+
+
+def run(args: argparse.Namespace) -> int:
+    project_root = project_root_from_script()
+    data_source_dir = project_root / "数据源"
+    source_dir = args.source_dir or data_source_dir / "数据源-手动更新" / "超长单-手动更新"
+    processed_dir = args.processed_dir or data_source_dir / "脚本处理后输出" / "超长单-脚本处理后"
+    output_path = args.output or project_root / "data" / "dashboard_long_order.js"
+    year = args.year or default_year(project_root)
+    row_limit = DATA_ROW_LIMIT
+    records = collect_records(source_dir, processed_dir, year, row_limit)
+    current_records = [record for record in records if record["source_path"].parent == source_dir]
     generated_at = datetime.now().replace(microsecond=0).isoformat(sep=" ")
     payload = build_payload(records, generated_at, year, row_limit)
     summary = payload["long_order_meta"]

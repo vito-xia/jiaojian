@@ -279,6 +279,13 @@
     const days = Number(row.deduction_days || 0);
     return '<span class="deduction-level level-' + index + '">' + escapeHtml(level) + '</span><span class="subline">日均 ' + average + ' 票 · ' + days + '天</span>';
   }
+  function longOrderLevelChip(row) {
+    return deductionLevelChip({
+      deduction_level: row.long_order_level,
+      deduction_average: row.long_order_average,
+      deduction_days: row.long_order_days
+    });
+  }
 
   function actionPill(action) {
     const labels = {
@@ -1243,13 +1250,14 @@
         <td>${branchButton(row.branch, row.parent_name)}</td>
         <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${row.is_new ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
         <td>${deductionLevelChip(row)}</td>
+        <td>${longOrderLevelChip(row)}</td>
         <td>${shortDate(row.latest_score_date)}</td>
         <td>${formatOptionalNumber(row.latest_timeout_count)}</td>
         <td><span class="rate">${formatOptionalRate(row.latest_timeout_rate)}</span></td>
         <td>${formatNumber(row.clearout_count)}次</td>
         <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="9">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="10">${state.platformQuery ? '没有匹配当前关键词的高积分网点' : '滚动 16 天内暂无积分达到 6 分的网点'}</td></tr>`;
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
   }
 
