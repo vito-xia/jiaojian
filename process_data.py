@@ -27,6 +27,7 @@ PICKUP_SCORE_SCENE = "物流停滞-揽收端"
 LONG_ORDER_SCORE_SCENE = "物流停滞-全链路"
 SCORE_SCENES = {PICKUP_SCORE_SCENE, LONG_ORDER_SCORE_SCENE}
 DEDUCTION_SCORE_VALUES = {0.0, 1.0, 2.0}
+HIGH_SCORE_EXPORT_DAYS = 15
 DELIVERY_SCORE_SCENES = {"物流停滞-派送端"}
 CONTROL_ACTIONS = {"揽收能力预警", "限制面单新签", "限制面单取号"}
 ACTION_SEVERITY = {"揽收能力预警": 1, "限制面单新签": 2, "限制面单取号": 3}
@@ -1374,7 +1375,9 @@ def write_high_score_excel(path: Path, dashboard: dict[str, Any]) -> int:
 
     row_count = 0
     dates = dashboard["platforms"]["抖音"]["dates"]
-    for board_day in reversed(dates):
+    latest_board_day = max(dates, default="")
+    first_board_day = (iso_day(latest_board_day) - timedelta(days=HIGH_SCORE_EXPORT_DAYS - 1)).isoformat() if latest_board_day else ""
+    for board_day in reversed([day for day in dates if day >= first_board_day]):
         rows = dashboard["high_scores_by_date"].get(board_day, [])
         ordered = sorted(rows, key=lambda row: (
             row.get("latest_deduction_volume") is None,
