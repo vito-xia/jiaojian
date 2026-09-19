@@ -275,9 +275,11 @@
     if (level === '—') return '<span class="deduction-level empty">—</span>';
     const levels = ['100-', '100-500', '500-1000', '1K-2K', '2K-5K', '5K-1W', '1W+'];
     const index = Math.max(0, levels.indexOf(level));
-    const average = row.deduction_average === null || row.deduction_average === undefined ? '—' : formatNumber(row.deduction_average);
+    const average = row.deduction_average === null || row.deduction_average === undefined
+      ? '—'
+      : Math.round(Number(row.deduction_average)).toLocaleString('zh-CN');
     const days = Number(row.deduction_days || 0);
-    return '<span class="deduction-level level-' + index + '">' + escapeHtml(level) + '</span><span class="subline">日均 ' + average + ' 票 · ' + days + '天</span>';
+    return '<span class="deduction-level level-' + index + '">' + escapeHtml(level) + '</span><span class="subline">日均 ' + average + ' · ' + days + '天</span>';
   }
   function longOrderLevelChip(row) {
     return deductionLevelChip({
