@@ -75,6 +75,31 @@
   }
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+  let initialLoadProgressFinished = false;
+
+  function setInitialLoadProgress(value, label) {
+    if (initialLoadProgressFinished) return;
+    const progress = $('#pageLoadProgress');
+    const bar = $('#pageLoadProgressBar');
+    if (!progress || !bar) return;
+    const amount = Math.max(0, Math.min(100, Number(value) || 0));
+    progress.hidden = false;
+    progress.setAttribute('aria-valuenow', String(Math.round(amount)));
+    if (label) progress.setAttribute('aria-label', label);
+    bar.style.width = `${amount}%`;
+  }
+
+  function finishInitialLoad(failed = false) {
+    if (initialLoadProgressFinished) return;
+    const progress = $('#pageLoadProgress');
+    setInitialLoadProgress(100, failed ? '看板部分数据加载失败' : '看板加载完成');
+    initialLoadProgressFinished = true;
+    if (!progress) return;
+    progress.classList.toggle('is-error', failed);
+    progress.classList.add('is-complete');
+    window.setTimeout(() => { progress.hidden = true; }, 750);
+  }
+
   const PAGE_SIZE = 10;
   const EMPTY_PROVINCE_VALUE = '__empty__';
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
@@ -464,43 +489,57 @@
   }
 
   async function initialize() {
+    setInitialLoadProgress(18, '正在初始化看板');
     if (!data?.meta) {
       setText('#freshness', '数据加载失败');
       $('#top10Body').innerHTML = '<tr class="empty-row"><td>看板引导数据不存在，请先运行更新看板数据.bat。</td></tr>';
+      finishInitialLoad(true);
       return;
     }
     restoreJdThresholds();
     syncJdThresholdInputs();
     bindEvents();
     setText('#freshness', '正在加载抖音数据');
+    setInitialLoadProgress(34, '正在加载抖音首屏数据');
     try {
       await ensurePlatformData(state.platform);
     } catch (error) {
       console.error(error);
       setText('#freshness', '数据加载失败');
       showToast('抖音数据加载失败，请刷新页面重试');
+      finishInitialLoad(true);
       return;
     }
+    setInitialLoadProgress(62, '抖音首屏数据已加载');
     const dates = datesForPlatform();
     state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
     renderDateSelector();
     renderAll();
+    setInitialLoadProgress(70, '正在补充平台预警与管控数据');
     scheduleBackgroundLoads();
   }
 
   function scheduleBackgroundLoads() {
     const run = () => {
+      setInitialLoadProgress(76, '正在加载平台预警与管控数据');
       ensureControlsData()
         .then(() => {
+          setInitialLoadProgress(88, '平台预警与管控数据已加载');
           renderAll();
           if (state.platform !== '\u6296\u97f3') return null;
+          setInitialLoadProgress(92, '正在加载网点检索数据');
           return ensureDrawerData('\u6296\u97f3');
         })
         .then(() => {
           if (state.platform === '\u6296\u97f3') renderBranchSearch();
+          setInitialLoadProgress(98, '首屏数据加载完成');
         })
-        .catch(error => console.warn(error))
+        .catch(error => {
+          console.warn(error);
+          finishInitialLoad(true);
+        })
         .finally(() => {
+          finishInitialLoad();
           window.setTimeout(() => {
             if (state.platform !== '\u6296\u97f3') return;
             ensureDeliveryData()

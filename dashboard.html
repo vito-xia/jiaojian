@@ -6,9 +6,12 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=27">
+  <link rel="stylesheet" href="assets/dashboard.css?v=28">
 </head>
 <body>
+  <div class="page-load-progress" id="pageLoadProgress" role="progressbar" aria-label="正在准备看板" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
+    <span class="page-load-progress-bar" id="pageLoadProgressBar"></span>
+  </div>
   <div class="ambient ambient-one"></div>
   <div class="ambient ambient-two"></div>
 
@@ -361,9 +364,9 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <noscript><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
+  <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=18"></script>
   <script src="assets/dashboard-loader.js?v=3"></script>
-  <script src="assets/dashboard.js?v=35"></script>
+  <script src="assets/dashboard.js?v=36"></script>
 </body>
 </html>
