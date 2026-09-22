@@ -1,6 +1,5 @@
 import tempfile
 import unittest
-from datetime import date, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -64,7 +63,7 @@ class HighScoreExportTests(unittest.TestCase):
         index = build_deduction_customer_index(rows, build_latest_customer_metadata(rows))
         self.assertEqual(index["网点甲"]["2026-09-10"][("code", "C1")], {"是"})
 
-    def test_workbook_keeps_available_dates_and_sorts_missing_after_zero(self):
+    def test_workbook_only_keeps_current_t1_t2_and_sorts_missing_after_zero(self):
         def row(branch, day, volume):
             return {
                 "branch": branch,
@@ -85,47 +84,59 @@ class HighScoreExportTests(unittest.TestCase):
             "platforms": {"抖音": {"dates": ["2026-09-14", "2026-09-15"]}},
             "high_scores_by_date": {
                 "2026-09-14": [row("甲", "2026-09-13", 5)],
-                "2026-09-15": [row("乙", "2026-09-15", None), row("丙", "2026-09-14", 0)],
+                "2026-09-15": [
+                    row("乙", "2026-09-15", None),
+                    row("丙", "2026-09-14", 0),
+                    row("丁", "2026-09-13", 100),
+                ],
             },
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "export.xlsx"
-            self.assertEqual(write_high_score_excel(path, dashboard), 3)
+            self.assertEqual(write_high_score_excel(path, dashboard), 2)
             workbook = load_workbook(path, read_only=True, data_only=True)
             try:
                 rows = list(workbook.active.values)
-                self.assertEqual([row[2] for row in rows[1:]], ["丙", "乙", "甲"])
-                self.assertEqual([row[1] for row in rows[1:]], ["T-2", "T-1", "T-2"])
+                self.assertEqual([row[0].date().isoformat() for row in rows[1:]], ["2026-09-15", "2026-09-15"])
+                self.assertEqual([row[2] for row in rows[1:]], ["丙", "乙"])
+                self.assertEqual([row[1] for row in rows[1:]], ["T-2", "T-1"])
                 self.assertEqual(rows[1][9], 0)
                 self.assertIsNone(rows[2][9])
-                self.assertEqual(rows[1][4], "100-\n日均 0 票 · 1天")
+                self.assertEqual(rows[1][4], "100-\n日均 0 · 1天")
             finally:
                 workbook.close()
 
-    def test_workbook_limits_dates_to_latest_15_calendar_days(self):
-        days = [(date(2026, 9, 1) + timedelta(days=offset)).isoformat() for offset in range(16)]
-        row = {
-            "branch": "网点甲", "stagnant_score": 6,
-            "deduction_level": "100-", "deduction_average": 0, "deduction_days": 1,
-            "long_order_level": "—", "long_order_average": None, "long_order_days": 0,
-            "deduction_fallback": "-", "clearout_count": 0,
-            "latest_deduction_volume": 0,
-        }
+    def test_workbook_level_text_matches_dashboard_display(self):
         dashboard = {
-            "platforms": {"抖音": {"dates": days}},
+            "platforms": {"抖音": {"dates": ["2026-09-14", "2026-09-15"]}},
             "high_scores_by_date": {
-                day: [{**row, "latest_score_date": day}] for day in days
+                "2026-09-14": [],
+                "2026-09-15": [{
+                    "branch": "网点甲", "stagnant_score": 6,
+                    "deduction_level": "1K-2K", "deduction_average": 1234.5, "deduction_days": 5,
+                    "long_order_level": "100-500", "long_order_average": 286.49, "long_order_days": 3,
+                    "deduction_fallback": "是", "clearout_count": 2,
+                    "latest_score_date": "2026-09-15", "latest_deduction_volume": 10,
+                }, {
+                    "branch": "网点乙", "stagnant_score": 6,
+                    "deduction_level": "超长单扣分", "deduction_average": None, "deduction_days": 1,
+                    "long_order_level": "—", "long_order_average": None, "long_order_days": 0,
+                    "deduction_fallback": "-", "clearout_count": 0,
+                    "latest_score_date": "2026-09-14", "latest_deduction_volume": 0,
+                }],
             },
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "export.xlsx"
-            self.assertEqual(write_high_score_excel(path, dashboard), 15)
+            self.assertEqual(write_high_score_excel(path, dashboard), 2)
             workbook = load_workbook(path, read_only=True, data_only=True)
             try:
-                exported_days = [record[0].date().isoformat() for record in list(workbook.active.values)[1:]]
-                self.assertEqual(exported_days[0], "2026-09-16")
-                self.assertEqual(exported_days[-1], "2026-09-02")
-                self.assertNotIn("2026-09-01", exported_days)
+                rows = list(workbook.active.values)
+                self.assertEqual(rows[1][4], "1K-2K\n日均 1,235 · 5天")
+                self.assertEqual(rows[1][5], "100-500\n日均 286 · 3天")
+                self.assertNotIn("票", rows[1][4])
+                self.assertEqual(rows[2][4], "超长单扣分")
+                self.assertEqual(rows[2][5], "—")
             finally:
                 workbook.close()
 

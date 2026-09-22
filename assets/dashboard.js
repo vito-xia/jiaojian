@@ -100,6 +100,63 @@
       || String(left.branch || '').localeCompare(String(right.branch || ''), 'zh-CN')
     ));
   }
+  function optionalFiniteNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : null;
+  }
+  function compareOptionalNumbersDescending(left, right) {
+    const leftAmount = optionalFiniteNumber(left);
+    const rightAmount = optionalFiniteNumber(right);
+    if (leftAmount === null) return rightAmount === null ? 0 : 1;
+    if (rightAmount === null) return -1;
+    return rightAmount - leftAmount;
+  }
+  function longOrderStagnantScore(branch, day) {
+    if (!day || !data.branch_score_trends || typeof data.branch_score_trends !== 'object') return null;
+    const range = new Set(dayRange(day, 16));
+    const branchScenes = data.branch_score_trends[branch] || {};
+    const total = Object.values(DOUYIN_SCORE_SCENES).reduce((sceneTotal, scene) => (
+      sceneTotal + (branchScenes[scene] || []).reduce((sum, point) => (
+        range.has(point?.date) ? sum + Number(point.score || 0) : sum
+      ), 0)
+    ), 0);
+    return Math.round((total + Number.EPSILON) * 100) / 100;
+  }
+  function longOrderLeadingCustomerPoint(branch, day) {
+    if (!day || !data.trends?.['抖音']) return null;
+    const customers = data.trends['抖音']?.[branch]?.customers || [];
+    const candidates = customers.map(customer => {
+      const point = (customer.series || []).find(item => item?.date === day);
+      return point ? { customer, point } : null;
+    }).filter(Boolean);
+    candidates.sort((left, right) => (
+      compareOptionalNumbersDescending(left.point.timeout_36h, right.point.timeout_36h)
+      || compareOptionalNumbersDescending(left.point.timeout_rate_36h, right.point.timeout_rate_36h)
+      || String(left.customer.customer || '').localeCompare(String(right.customer.customer || ''), 'zh-CN')
+      || String(left.customer.customer_code || '').localeCompare(String(right.customer.customer_code || ''), 'zh-CN')
+    ));
+    return candidates[0]?.point || null;
+  }
+  function longOrderRecentAverage(branch, day) {
+    if (!day) return null;
+    const range = new Set(dayRange(day, 15));
+    const values = (data.long_order_trends?.[branch] || []).filter(point => range.has(point?.date))
+      .map(point => optionalFiniteNumber(point.abnormal_count))
+      .filter(value => value !== null);
+    if (!values.length) return null;
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return Math.floor(average + 0.5);
+  }
+  function longOrderMetrics(branch, day) {
+    const customerPoint = longOrderLeadingCustomerPoint(branch, day);
+    return {
+      stagnantScore: longOrderStagnantScore(branch, day),
+      timeout36h: customerPoint ? optionalFiniteNumber(customerPoint.timeout_36h) : null,
+      timeoutRate36h: customerPoint ? optionalFiniteNumber(customerPoint.timeout_rate_36h) : null,
+      recentAverage: longOrderRecentAverage(branch, day)
+    };
+  }
   function tdayPlatformData() {
     if (!data.t_day?.date || data.t_day.date !== localToday()) return null;
     return data.t_day?.platforms?.[state.platform] || null;
@@ -1437,7 +1494,7 @@
     if (!longOrderDataReady()) {
       setText('#longOrderStatus', longOrderLoadError ? '超长单数据加载失败' : '超长单数据载入中');
       setText('#longOrderCount', '0 条');
-      if (body) body.innerHTML = `<tr class="empty-row"><td colspan="6">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
+      if (body) body.innerHTML = `<tr class="empty-row"><td colspan="10">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
       if (pagination) pagination.innerHTML = '';
       return;
     }
@@ -1447,7 +1504,7 @@
     if (!rows.length) {
       const sourceDates = data.long_order_meta?.source_dates || [];
       setText('#longOrderStatus', sourceDates.includes(state.date) ? '当前日期暂无超长单记录' : '当前日期无超长单源数据');
-      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="6">当前日期暂无可展示的超长单记录</td></tr>';
+      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="10">当前日期暂无可展示的超长单记录</td></tr>';
       if (pagination) pagination.innerHTML = '';
       return;
     }
@@ -1461,7 +1518,8 @@
     if (body) {
       body.innerHTML = pageRows.map(row => {
         const level = row.abnormal_level === null || row.abnormal_level === undefined || row.abnormal_level === '' ? '—' : row.abnormal_level;
-        return `<tr><td class="province-cell">${provinceCell(row.province)}</td><td>${escapeHtml(row.city || '—')}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td></tr>`;
+        const metrics = longOrderMetrics(row.branch, state.date);
+        return `<tr><td class="province-cell">${provinceCell(row.province)}</td><td>${escapeHtml(row.city || '—')}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td><td>${scoreChip(metrics.stagnantScore)}</td><td><span class="metric-number">${formatOptionalNumber(metrics.timeout36h)}</span></td><td><span class="rate">${formatOptionalRate(metrics.timeoutRate36h)}</span></td><td><span class="metric-number">${formatOptionalNumber(metrics.recentAverage)}</span></td></tr>`;
       }).join('');
     }
     renderLongOrderPagination(pagination, state.longOrderPage, pages);

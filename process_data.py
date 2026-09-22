@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import posixpath
 import re
 from collections import Counter, defaultdict
@@ -27,7 +28,6 @@ PICKUP_SCORE_SCENE = "物流停滞-揽收端"
 LONG_ORDER_SCORE_SCENE = "物流停滞-全链路"
 SCORE_SCENES = {PICKUP_SCORE_SCENE, LONG_ORDER_SCORE_SCENE}
 DEDUCTION_SCORE_VALUES = {0.0, 1.0, 2.0}
-HIGH_SCORE_EXPORT_DAYS = 15
 DELIVERY_SCORE_SCENES = {"物流停滞-派送端"}
 CONTROL_ACTIONS = {"揽收能力预警", "限制面单新签", "限制面单取号"}
 ACTION_SEVERITY = {"揽收能力预警": 1, "限制面单新签": 2, "限制面单取号": 3}
@@ -1335,13 +1335,15 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
 
 
 def excel_volume_text(value: int | float) -> str:
-    return f"{value:,.2f}".rstrip("0").rstrip(".")
+    return f"{math.floor(float(value) + 0.5):,}"
 
 
 def excel_level_text(level: str, average: int | float | None, days: int) -> str:
+    if level in {"超长单扣分", "未扣分"}:
+        return "超长单扣分"
     if average is None:
         return level or "—"
-    return f"{level}\n日均 {excel_volume_text(average)} 票 · {days}天"
+    return f"{level}\n日均 {excel_volume_text(average)} · {days}天"
 
 
 def deduction_date_label(board_day: str, score_day: str) -> str:
@@ -1376,43 +1378,46 @@ def write_high_score_excel(path: Path, dashboard: dict[str, Any]) -> int:
     row_count = 0
     dates = dashboard["platforms"]["抖音"]["dates"]
     latest_board_day = max(dates, default="")
-    first_board_day = (iso_day(latest_board_day) - timedelta(days=HIGH_SCORE_EXPORT_DAYS - 1)).isoformat() if latest_board_day else ""
-    for board_day in reversed([day for day in dates if day >= first_board_day]):
-        rows = dashboard["high_scores_by_date"].get(board_day, [])
-        ordered = sorted(rows, key=lambda row: (
-            row.get("latest_deduction_volume") is None,
-            -number(row.get("latest_deduction_volume")),
-            -number(row.get("stagnant_score")),
-            row["branch"],
-        ))
-        for row in ordered:
-            score_day = row.get("latest_score_date") or ""
-            sheet.append([
-                iso_day(board_day), deduction_date_label(board_day, score_day), row["branch"],
-                row["stagnant_score"],
-                excel_level_text(row["deduction_level"], row["deduction_average"], row["deduction_days"]),
-                excel_level_text(row["long_order_level"], row["long_order_average"], row["long_order_days"]),
-                row.get("deduction_fallback") or "-", row["clearout_count"],
-                iso_day(score_day) if score_day else None, row.get("latest_deduction_volume"),
-            ])
-            row_count += 1
-            sheet.row_dimensions[row_count + 1].height = 38
-            for cell in sheet[row_count + 1]:
-                cell.font = Font(name="微软雅黑", size=10, color="24364A")
-                cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
-            for column in (3, 5, 6):
-                sheet.cell(row_count + 1, column).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
-            for column in (1, 9):
-                sheet.cell(row_count + 1, column).number_format = "yyyy-mm-dd"
-            for column in (4, 8, 10):
-                sheet.cell(row_count + 1, column).number_format = "#,##0.##"
-            marker = sheet.cell(row_count + 1, 2)
-            if marker.value == "T-1":
-                marker.fill = PatternFill("solid", fgColor="FCE8E6")
-            elif marker.value == "T-2":
-                marker.fill = PatternFill("solid", fgColor="FFF3D6")
-            for column in (2, 3, 5, 6, 7):
-                sheet.cell(row_count + 1, column).data_type = "s"
+    rows = dashboard["high_scores_by_date"].get(latest_board_day, []) if latest_board_day else []
+    current_rows = []
+    for row in rows:
+        marker = deduction_date_label(latest_board_day, row.get("latest_score_date") or "")
+        if marker in {"T-1", "T-2"}:
+            current_rows.append((row, marker))
+    ordered = sorted(current_rows, key=lambda item: (
+        item[0].get("latest_deduction_volume") is None,
+        -number(item[0].get("latest_deduction_volume")),
+        -number(item[0].get("stagnant_score")),
+        item[0]["branch"],
+    ))
+    for row, marker_label in ordered:
+        score_day = row.get("latest_score_date") or ""
+        sheet.append([
+            iso_day(latest_board_day), marker_label, row["branch"],
+            row["stagnant_score"],
+            excel_level_text(row["deduction_level"], row["deduction_average"], row["deduction_days"]),
+            excel_level_text(row["long_order_level"], row["long_order_average"], row["long_order_days"]),
+            row.get("deduction_fallback") or "-", row["clearout_count"],
+            iso_day(score_day) if score_day else None, row.get("latest_deduction_volume"),
+        ])
+        row_count += 1
+        sheet.row_dimensions[row_count + 1].height = 38
+        for cell in sheet[row_count + 1]:
+            cell.font = Font(name="微软雅黑", size=10, color="24364A")
+            cell.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+        for column in (3, 5, 6):
+            sheet.cell(row_count + 1, column).alignment = Alignment(vertical="center", horizontal="left", wrap_text=True)
+        for column in (1, 9):
+            sheet.cell(row_count + 1, column).number_format = "yyyy-mm-dd"
+        for column in (4, 8, 10):
+            sheet.cell(row_count + 1, column).number_format = "#,##0.##"
+        marker = sheet.cell(row_count + 1, 2)
+        if marker.value == "T-1":
+            marker.fill = PatternFill("solid", fgColor="FCE8E6")
+        elif marker.value == "T-2":
+            marker.fill = PatternFill("solid", fgColor="FFF3D6")
+        for column in (2, 3, 5, 6, 7):
+            sheet.cell(row_count + 1, column).data_type = "s"
     sheet.auto_filter.ref = f"A1:J{row_count + 1}"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
