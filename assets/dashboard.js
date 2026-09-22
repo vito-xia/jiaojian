@@ -61,6 +61,45 @@
   function ensureTdayData() { return tdayDataReady() ? Promise.resolve(data) : loadDataChunk(TDAY_CHUNK); }
   function longOrderDataReady() { return Boolean(data.long_order_trends && typeof data.long_order_trends === 'object'); }
   function ensureLongOrderData() { return longOrderDataReady() ? Promise.resolve(data) : loadDataChunk(LONG_ORDER_CHUNK); }
+  function ensureLongOrderModuleData() {
+    if (longOrderDataReady()) {
+      longOrderLoadError = null;
+      return Promise.resolve(data);
+    }
+    longOrderLoadError = null;
+    return ensureLongOrderData().then(result => {
+      longOrderLoadError = null;
+      return result;
+    }).catch(error => {
+      longOrderLoadError = error;
+      throw error;
+    });
+  }
+  function longOrderRowsForDate(day = state.date) {
+    if (!longOrderDataReady() || !day) return [];
+    const rows = [];
+    Object.entries(data.long_order_trends || {}).forEach(([branch, points]) => {
+      (Array.isArray(points) ? points : []).forEach(point => {
+        if (point?.date !== day) return;
+        rows.push({ ...point, branch });
+      });
+    });
+    const rank = value => {
+      const amount = Number(value);
+      return Number.isFinite(amount) ? amount : Number.MAX_SAFE_INTEGER;
+    };
+    const numeric = value => {
+      if (value === null || value === undefined || value === '') return Number.NEGATIVE_INFINITY;
+      const amount = Number(value);
+      return Number.isFinite(amount) ? amount : Number.NEGATIVE_INFINITY;
+    };
+    return rows.sort((left, right) => (
+      numeric(right.abnormal_count) - numeric(left.abnormal_count)
+      || numeric(right.abnormal_rate) - numeric(left.abnormal_rate)
+      || rank(left.source_rank) - rank(right.source_rank)
+      || String(left.branch || '').localeCompare(String(right.branch || ''), 'zh-CN')
+    ));
+  }
   function tdayPlatformData() {
     if (!data.t_day?.date || data.t_day.date !== localToday()) return null;
     return data.t_day?.platforms?.[state.platform] || null;
@@ -103,6 +142,7 @@
   const PAGE_SIZE = 10;
   const EMPTY_PROVINCE_VALUE = '__empty__';
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
+  const LONG_ORDER_PAGE_SIZES = Object.freeze([10, 20, 50, 100]);
   const JD_TREND_HOURS = Object.freeze([48, 72, 96]);
   const DOUYIN_SCORE_SCENES = Object.freeze({ pickup: '物流停滞-揽收端', full: '物流停滞-全链路' });
   const DOUYIN_AI_MAX_CUSTOMERS = 4;
@@ -110,9 +150,10 @@
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, longOrderPage: 1, longOrderPageSize: 10, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
+  let longOrderLoadError = null;
   let jdPeriodContext = null;
 
   function escapeHtml(value) {
@@ -532,6 +573,14 @@
         })
         .then(() => {
           if (state.platform === '\u6296\u97f3') renderBranchSearch();
+          if (state.platform !== '\u6296\u97f3') return null;
+          return ensureLongOrderModuleData().catch(error => {
+            console.warn(error);
+            return null;
+          });
+        })
+        .then(() => {
+          if (state.platform === '\u6296\u97f3') renderLongOrderModule();
           setInitialLoadProgress(98, '首屏数据加载完成');
         })
         .catch(error => {
@@ -576,6 +625,7 @@
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
       state.topPage = 1;
+      state.longOrderPage = 1;
       state.jdControlPage = 1;
       renderDateSelector();
       setText('#freshness', '正在加载' + state.platform + '数据');
@@ -590,6 +640,11 @@
       state.date = dates.includes(data.meta.as_of) ? data.meta.as_of : dates[dates.length - 1] || '';
       renderDateSelector();
       renderAll();
+      if (state.platform === '\u6296\u97f3' && !isTdayActive() && !longOrderDataReady()) {
+        ensureLongOrderModuleData()
+          .then(() => { if (state.platform === '\u6296\u97f3') renderLongOrderModule(); })
+          .catch(error => { console.warn(error); renderLongOrderModule(); });
+      }
       showToast('已切换至' + state.platform + '平台');
     });
     $('#dateSelect').addEventListener('change', async event => {
@@ -603,6 +658,7 @@
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
       state.topPage = 1;
+      state.longOrderPage = 1;
       state.jdControlPage = 1;
       updateDateButtons();
       if (isTdayActive()) {
@@ -750,6 +806,15 @@
       renderTop10();
     });
     $("#top10Pagination")?.addEventListener("click", event => changePage(event, "top10"));
+    $('#longOrderPagination')?.addEventListener('click', event => changePage(event, 'long-order'));
+    $('#longOrderPagination')?.addEventListener('change', event => {
+      if (event.target.id !== 'longOrderPageSize') return;
+      const value = Number(event.target.value);
+      if (!LONG_ORDER_PAGE_SIZES.includes(value)) return;
+      state.longOrderPageSize = value;
+      state.longOrderPage = 1;
+      renderLongOrderModule();
+    });
     $("#jdCustomerPeriod")?.addEventListener("change", () => {
       if (!jdPeriodContext) return;
       renderJdCustomerPeriodAnalysis(jdPeriodContext.customers, jdPeriodContext.range, {
@@ -846,6 +911,7 @@
     state.branchProvince = '';
     state.deliveryProvince = '';
     state.topPage = 1;
+    state.longOrderPage = 1;
     state.jdControlPage = 1;
     updateDateButtons();
     if (isTdayActive()) {
@@ -867,6 +933,7 @@
     renderJdControlStatistics();
     renderBranchSearch();
     renderPlatformModule();
+    renderLongOrderModule();
     renderDeliveryModule();
     renderDailyAnalysis();
   }
@@ -1329,6 +1396,77 @@
     return `<span class="action-pill ${kind}">${label}</span>`;
   }
 
+  function renderLongOrderPagination(container, page, pages) {
+    if (!container || pages < 1) {
+      if (container) container.innerHTML = '';
+      return;
+    }
+    const visible = new Set([1, pages]);
+    if (pages <= 7) {
+      for (let value = 1; value <= pages; value += 1) visible.add(value);
+    } else if (page <= 3) {
+      [2, 3, 4, 5].forEach(value => visible.add(value));
+    } else if (page >= pages - 2) {
+      [pages - 4, pages - 3, pages - 2, pages - 1].forEach(value => visible.add(value));
+    } else {
+      [page - 1, page, page + 1].forEach(value => visible.add(value));
+    }
+    const ordered = [...visible].filter(value => value >= 1 && value <= pages).sort((a, b) => a - b);
+    let last = 0;
+    const numbers = ordered.map(value => {
+      const gap = value - last > 1 ? '<span class="page-copy">…</span>' : '';
+      last = value;
+      return `${gap}<button class="page-button ${value === page ? 'active' : ''}" type="button" data-kind="long-order" data-page="${value}">${value}</button>`;
+    }).join('');
+    const sizes = LONG_ORDER_PAGE_SIZES.map(size => `<option value="${size}" ${size === state.longOrderPageSize ? 'selected' : ''}>${size}条/页</option>`).join('');
+    container.innerHTML = `<div class="long-order-page-numbers"><button class="page-button" type="button" data-kind="long-order" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="上一页">‹</button>${numbers}<button class="page-button" type="button" data-kind="long-order" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''} aria-label="下一页">›</button></div><label class="long-order-page-size" for="longOrderPageSize"><select id="longOrderPageSize" aria-label="超长单监控每页条数">${sizes}</select></label>`;
+  }
+
+  function renderLongOrderModule() {
+    const active = state.platform === '\u6296\u97f3' && !isTdayActive();
+    const section = $('#long-order-monitor');
+    const nav = $('#longOrderNav');
+    if (section) section.hidden = !active;
+    if (nav) nav.hidden = !active;
+    if (!active) return;
+
+    const body = $('#longOrderBody');
+    const pagination = $('#longOrderPagination');
+    setText('#longOrderDate', state.date || '—');
+    setText('#longOrderCaption', `按超长单异常运单数降序展示 TOP${Number(data.long_order_meta?.row_limit || 1000)} 条记录`);
+    if (!longOrderDataReady()) {
+      setText('#longOrderStatus', longOrderLoadError ? '超长单数据加载失败' : '超长单数据载入中');
+      setText('#longOrderCount', '0 条');
+      if (body) body.innerHTML = `<tr class="empty-row"><td colspan="6">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
+      if (pagination) pagination.innerHTML = '';
+      return;
+    }
+
+    const rows = longOrderRowsForDate(state.date);
+    setText('#longOrderCount', `${rows.length} 条`);
+    if (!rows.length) {
+      const sourceDates = data.long_order_meta?.source_dates || [];
+      setText('#longOrderStatus', sourceDates.includes(state.date) ? '当前日期暂无超长单记录' : '当前日期无超长单源数据');
+      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="6">当前日期暂无可展示的超长单记录</td></tr>';
+      if (pagination) pagination.innerHTML = '';
+      return;
+    }
+
+    setText('#longOrderStatus', `超长单数据已接入 · ${shortDate(state.date)}`);
+    const pageSize = LONG_ORDER_PAGE_SIZES.includes(Number(state.longOrderPageSize)) ? Number(state.longOrderPageSize) : 10;
+    state.longOrderPageSize = pageSize;
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    state.longOrderPage = Math.min(Math.max(1, state.longOrderPage), pages);
+    const pageRows = rows.slice((state.longOrderPage - 1) * pageSize, state.longOrderPage * pageSize);
+    if (body) {
+      body.innerHTML = pageRows.map(row => {
+        const level = row.abnormal_level === null || row.abnormal_level === undefined || row.abnormal_level === '' ? '—' : row.abnormal_level;
+        return `<tr><td class="province-cell">${provinceCell(row.province)}</td><td>${escapeHtml(row.city || '—')}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td></tr>`;
+      }).join('');
+    }
+    renderLongOrderPagination(pagination, state.longOrderPage, pages);
+  }
+
   function renderDeliveryModule() {
     const active = !isTdayActive() && state.platform === '抖音' && Boolean(deliveryMonitor().score_dates?.length || deliveryMonitor().control_dates?.length);
     const section = $('#delivery-score-monitor');
@@ -1419,6 +1557,7 @@
     else if (kind === 'delivery-control') { state.deliveryControlPage = page; renderDeliveryControls(); }
     else if (kind === 'delivery-high-score') { state.deliveryHighScorePage = page; renderDeliveryHighScores(); }
     else if (kind === 'top10') { state.topPage = page; renderTop10(); }
+    else if (kind === 'long-order') { state.longOrderPage = page; renderLongOrderModule(); }
     else if (kind === 'jd-control') { state.jdControlPage = page; renderJdControlStatistics(); }
   }
 

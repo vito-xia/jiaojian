@@ -2,8 +2,9 @@
 
 这是暂时独立于 ``process_data.py`` 的验证脚本。它读取
 ``数据源/数据源-手动更新/超长单-手动更新`` 中每个日期工作簿的 ``列表数据``
-工作表，保留表头和前 1000 条数据，精简副本写入历史处理后目录，同时生成供页面按需加载的
-``data/dashboard_long_order.js``。
+工作表，先按 ``超长单异常运单数`` 降序，再保留 TOP1000 数据，精简副本写入历史处理后目录，同时生成供页面按需加载的
+``data/dashboard_long_order.js``。分片中的每个趋势点同时保留超长单监控表所需的机构、地区、
+应签总数和异常等级字段。
 
 源工作簿的 XML 维度可能错误地写成 A1:A1，因此读取前必须调用
 ``reset_dimensions()``，不能依据 ``max_row`` 判断数据行数。
@@ -26,11 +27,16 @@ from openpyxl import Workbook, load_workbook
 
 
 TARGET_SHEET = "列表数据"
+PROVINCE_HEADER = "省份"
+CITY_HEADER = "城市"
 BRANCH_HEADER = "网点"
 COUNT_HEADER = "超长单异常运单数"
+EXPECTED_SIGN_COUNT_HEADER = "超长单应签运单总数"
 RATE_HEADER = "超长单异常率"
+ABNORMAL_LEVEL_HEADER = "超长单异常率-异常等级"
 DATA_ROW_LIMIT = 1000
 CHUNK_NAME = "long-order"
+PAYLOAD_SCHEMA_VERSION = 2
 SOURCE_FILE_PATTERN = re.compile(r"^(?P<month>\d{1,2})月(?P<day>\d{1,2})日\.xlsx$", re.IGNORECASE)
 EMPTY_VALUES = {"", "-", "--", "—", "/", "无", "暂无", "null", "none", "nan"}
 
@@ -184,7 +190,15 @@ def header_info(rows: list[tuple[Any, ...]], path: Path) -> tuple[int, list[str]
         headers = [text(value) for value in row]
         while headers and not headers[-1]:
             headers.pop()
-        required = {BRANCH_HEADER, COUNT_HEADER, RATE_HEADER}
+        required = {
+            PROVINCE_HEADER,
+            CITY_HEADER,
+            BRANCH_HEADER,
+            COUNT_HEADER,
+            EXPECTED_SIGN_COUNT_HEADER,
+            RATE_HEADER,
+            ABNORMAL_LEVEL_HEADER,
+        }
         if required.issubset(headers):
             duplicates = [header for header in required if headers.count(header) != 1]
             if duplicates:
@@ -193,7 +207,8 @@ def header_info(rows: list[tuple[Any, ...]], path: Path) -> tuple[int, list[str]
             return row_number, headers, columns
     raise LongOrderFormatError(
         f"{path.name} 的 {TARGET_SHEET} 前30行未找到表头："
-        f"{BRANCH_HEADER}、{COUNT_HEADER}、{RATE_HEADER}"
+        f"{PROVINCE_HEADER}、{CITY_HEADER}、{BRANCH_HEADER}、{COUNT_HEADER}、"
+        f"{EXPECTED_SIGN_COUNT_HEADER}、{RATE_HEADER}、{ABNORMAL_LEVEL_HEADER}"
     )
 
 
@@ -208,14 +223,12 @@ def read_one_source(day: str, path: Path, row_limit: int) -> dict[str, Any]:
         sheet.reset_dimensions()
         first_rows = list(sheet.iter_rows(min_row=1, max_row=30, values_only=True))
         header_row, headers, columns = header_info(first_rows, path)
-        output_rows: list[list[Any]] = []
+        source_rows: list[tuple[int, list[Any], int | float | None]] = []
         branch_rows: dict[str, dict[str, Any]] = {}
         warnings: list[str] = []
-        requested_last_row = header_row + row_limit
         for row_number, row in enumerate(
             sheet.iter_rows(
                 min_row=header_row + 1,
-                max_row=requested_last_row,
                 max_col=len(headers),
                 values_only=True,
             ),
@@ -224,23 +237,43 @@ def read_one_source(day: str, path: Path, row_limit: int) -> dict[str, Any]:
             values = list(row[: len(headers)])
             if len(values) < len(headers):
                 values.extend([None] * (len(headers) - len(values)))
+            if not any(value not in (None, "") for value in values):
+                continue
+            count = normalize_count(values[columns[COUNT_HEADER]])
+            source_rows.append((row_number, values, count))
+
+        # 先完成全表排序，再取 TOP1000。None 放在真实 0 后面，排序稳定以保留源表顺序。
+        source_rows.sort(
+            key=lambda item: (
+                item[2] is not None,
+                item[2] if item[2] is not None else 0,
+            ),
+            reverse=True,
+        )
+        selected_rows = source_rows[:row_limit]
+        output_rows = []
+        for source_rank, (row_number, values, count) in enumerate(selected_rows, 1):
             output_rows.append(values)
             branch = text(values[columns[BRANCH_HEADER]])
             if not branch:
                 continue
             if branch in branch_rows:
-                raise LongOrderFormatError(f"{path.name} 前{row_limit}条中网点重复：{branch}")
-            count = normalize_count(values[columns[COUNT_HEADER]])
+                raise LongOrderFormatError(f"{path.name} 排序后 TOP{row_limit} 内网点重复：{branch}")
+            expected_sign_count = normalize_count(values[columns[EXPECTED_SIGN_COUNT_HEADER]])
             rate = normalize_rate_points(values[columns[RATE_HEADER]])
-            if count is None or rate is None:
-                warnings.append(f"第{row_number}行量或率为空")
+            if count is None or expected_sign_count is None or rate is None:
+                warnings.append(f"第{row_number}行量、应签总数或率为空")
             branch_rows[branch] = {
                 "date": day,
+                "source_rank": source_rank,
+                "province": text(values[columns[PROVINCE_HEADER]]),
+                "city": text(values[columns[CITY_HEADER]]),
+                "branch": branch,
                 "abnormal_count": count,
+                "expected_sign_count": expected_sign_count,
                 "abnormal_rate": rate,
+                "abnormal_level": text(values[columns[ABNORMAL_LEVEL_HEADER]]) or None,
             }
-        while output_rows and not any(value not in (None, "") for value in output_rows[-1]):
-            output_rows.pop()
         if not output_rows:
             raise LongOrderFormatError(f"{path.name} 没有可保留的数据行")
     finally:
@@ -281,7 +314,7 @@ def build_payload(records: list[dict[str, Any]], generated_at: str, year: int, r
     return {
         "long_order_trends": ordered_trends,
         "long_order_meta": {
-            "schema_version": 1,
+            "schema_version": PAYLOAD_SCHEMA_VERSION,
             "generated_at": generated_at,
             "year": year,
             "row_limit": row_limit,
@@ -391,7 +424,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="截取超长单列表前1000条并生成抖音趋势分片")
+    parser = argparse.ArgumentParser(description="按超长单异常运单数降序截取列表 TOP1000 并生成抖音趋势分片")
     parser.add_argument("--year", type=int, help="文件名月份日期对应的年份，默认取当前数据 as_of 年份")
     parser.add_argument("--source-dir", type=Path, help="明细源目录")
     parser.add_argument("--processed-dir", type=Path, help="处理后目录")

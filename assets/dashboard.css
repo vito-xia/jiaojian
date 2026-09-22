@@ -154,6 +154,16 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .table-scroll { width: 100%; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #d1d1d6 transparent; }
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
 .top10-table { min-width: 1500px; }
+.long-order-table { min-width: 1080px; }
+.long-order-table th, .long-order-table td { white-space: nowrap; }
+.long-order-table th:nth-child(1), .long-order-table td:nth-child(1) { width: 90px; }
+.long-order-table th:nth-child(2), .long-order-table td:nth-child(2) { width: 110px; }
+.long-order-table th:nth-child(3), .long-order-table td:nth-child(3) { width: 320px; }
+.long-order-table th:nth-child(4), .long-order-table td:nth-child(4), .long-order-table th:nth-child(5), .long-order-table td:nth-child(5) { width: 180px; }
+.long-order-table th:nth-child(6), .long-order-table td:nth-child(6) { width: 160px; }
+.long-order-table .branch-button { max-width: 300px; }
+.long-order-table .province-cell { width: 90px; max-width: 90px; }
+.long-order-table .province-label { max-width: 90px; }
 .data-table th { height: 46px; padding: 0 12px; color: var(--quiet); background: rgba(250,250,252,.92); border-bottom: 1px solid var(--line); text-align: left; font-size: 10px; font-weight: 650; letter-spacing: .02em; white-space: nowrap; }
 .data-table th:first-child, .data-table td:first-child { padding-left: 24px; }
 .data-table th:last-child, .data-table td:last-child { padding-right: 24px; }
@@ -293,6 +303,11 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .feedback-result.passed { color: #147a3f; background: #dcf6e6; }
 .feedback-result.neutral { color: var(--muted); background: #f1f1f3; }
 .pagination { min-height: 60px; padding: 13px 18px; display: flex; align-items: center; justify-content: center; gap: 6px; border-top: 1px solid var(--line); }
+.long-order-pagination { justify-content: space-between; }
+.long-order-page-numbers { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.long-order-page-size { display: inline-flex; align-items: center; }
+.long-order-page-size select { height: 31px; padding: 0 26px 0 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--muted); background: #fff; cursor: pointer; font-size: 10px; }
+.long-order-page-size select:focus { border-color: rgba(0,113,227,.5); box-shadow: 0 0 0 3px rgba(0,113,227,.1); }
 .page-button { min-width: 31px; height: 31px; padding: 0 8px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: #fff; cursor: pointer; font-size: 10px; transition: color .18s, border-color .18s, background .18s; }
 .page-button:hover:not(:disabled), .page-button.active { color: #fff; border-color: var(--blue); background: var(--blue); }
 .page-button:disabled { opacity: .3; cursor: default; }
@@ -555,6 +570,7 @@ footer { padding: 0 6px; display: flex; justify-content: space-between; color: v
   .platform-search-bar { align-items: stretch; flex-direction: column; gap: 12px; }.platform-search-control { flex-basis: auto; width: 100%; }
   .branch-search-card { align-items: stretch; flex-direction: column; gap: 18px; }.branch-search-control { flex-basis: auto; width: 100%; }.branch-search-results-head { align-items: flex-start; flex-direction: column; gap: 5px; }.branch-search-results-grid { grid-template-columns: 1fr; }
   .data-card { border-radius: 22px; }.top10-table { min-width: 1350px; }.data-table th:first-child, .data-table td:first-child { padding-left: 16px; }
+  .long-order-pagination { align-items: flex-start; flex-wrap: wrap; }.long-order-page-numbers { flex-wrap: wrap; }
 
   .methodology { align-items: flex-start; flex-direction: column; }.daily-analysis { padding: 20px; }.analysis-heading { align-items: flex-start; flex-direction: column; }.analysis-metrics { grid-template-columns: 1fr 1fr; }.analysis-conclusion ul { grid-template-columns: 1fr; }
   .drawer { width: 100%; }.drawer-header { padding: 22px 20px 18px; }.drawer-header h2 { font-size: 23px; }.drawer-summary { padding: 18px 20px 0; }.drawer-score-trend { margin: 18px 32px 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 5px 16px rgba(0,0,0,.035); }

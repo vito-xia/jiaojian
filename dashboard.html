@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=28">
+  <link rel="stylesheet" href="assets/dashboard.css?v=29">
 </head>
 <body>
   <div class="page-load-progress" id="pageLoadProgress" role="progressbar" aria-label="正在准备看板" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
@@ -24,6 +24,7 @@
       <div class="nav-links" aria-label="页面模块">
         <a id="platformControlNav" href="#platform-control">平台预警与管控</a>
         <a href="#delivery-warning">交件预警</a>
+        <a id="longOrderNav" href="#long-order-monitor" hidden>超长单监控</a>
         <a id="jdControlStatsNav" href="#jd-control-statistics" hidden>管控统计</a>
         <a id="deliveryScoreNav" href="#delivery-score-monitor" hidden>派送积分监控</a>
       </div>
@@ -236,6 +237,33 @@
       </article>
      </section>
 
+    <section class="content-section" id="long-order-monitor" hidden>
+      <div class="section-heading">
+        <div>
+          <div class="section-kicker"><span class="kicker-index blue">03</span>超长单监控</div>
+          <h2>超长单监控</h2>
+          <p>按当前抖音数据日展示列表数据中按超长单异常运单数降序排列的 TOP1000 超长单记录，点击机构查看网点详情与趋势。</p>
+        </div>
+        <div class="section-status"><span class="status-dot active"></span><span id="longOrderStatus">超长单数据载入中</span></div>
+      </div>
+      <article class="data-card data-card-wide">
+        <div class="card-toolbar">
+          <div>
+            <h3>抖音 · <span id="longOrderDate">—</span></h3>
+            <p id="longOrderCaption">按超长单异常运单数降序展示 TOP1000 条记录</p>
+          </div>
+          <span class="record-count" id="longOrderCount">0 条</span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table long-order-table">
+            <thead><tr><th>省份</th><th>城市</th><th>机构</th><th>超长单异常运单数</th><th>超长单应签运单总数</th><th>超长单异常率</th></tr></thead>
+            <tbody id="longOrderBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination long-order-pagination" id="longOrderPagination" aria-label="超长单监控分页"></div>
+      </article>
+    </section>
+
     <section class="content-section jd-control-statistics" id="jd-control-statistics" hidden>
       <div class="section-heading">
         <div>
@@ -267,7 +295,7 @@
     <section class="content-section" id="delivery-score-monitor" hidden>
       <div class="section-heading">
         <div>
-          <div class="section-kicker"><span class="kicker-index blue">03</span>派送监控</div>
+          <div class="section-kicker"><span class="kicker-index blue">04</span>派送监控</div>
           <h2>派送积分监控</h2>
           <p>独立读取⑥派送积分监控，按交件积分口径累计派送积分，详情展示最近 15 天扣分；虚假签收不纳入本模块。</p>
         </div>
@@ -367,6 +395,6 @@
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=18"></script>
   <script src="assets/dashboard-loader.js?v=3"></script>
-  <script src="assets/dashboard.js?v=36"></script>
+  <script src="assets/dashboard.js?v=38"></script>
 </body>
 </html>
