@@ -3,8 +3,8 @@
 这是暂时独立于 ``process_data.py`` 的验证脚本。它读取
 ``数据源/数据源-手动更新/超长单-手动更新`` 中每个日期工作簿的 ``列表数据``
 工作表，先按 ``超长单异常运单数`` 降序，再保留 TOP1000 数据，精简副本写入历史处理后目录，同时生成供页面按需加载的
-``data/dashboard_long_order.js``。分片中的每个趋势点同时保留超长单监控表所需的机构、地区、
-应签总数和异常等级字段。
+``data/dashboard_long_order.js``。分片中的每个趋势点保留超长单监控表所需的机构、
+业务省区、应签总数和异常等级字段；源表中的省份、城市只保留在处理后 Excel 中。
 
 源工作簿的 XML 维度可能错误地写成 A1:A1，因此读取前必须调用
 ``reset_dimensions()``，不能依据 ``max_row`` 判断数据行数。
@@ -36,7 +36,7 @@ RATE_HEADER = "超长单异常率"
 ABNORMAL_LEVEL_HEADER = "超长单异常率-异常等级"
 DATA_ROW_LIMIT = 1000
 CHUNK_NAME = "long-order"
-PAYLOAD_SCHEMA_VERSION = 2
+PAYLOAD_SCHEMA_VERSION = 3
 SOURCE_FILE_PATTERN = re.compile(r"^(?P<month>\d{1,2})月(?P<day>\d{1,2})日\.xlsx$", re.IGNORECASE)
 EMPTY_VALUES = {"", "-", "--", "—", "/", "无", "暂无", "null", "none", "nan"}
 
@@ -97,6 +97,26 @@ def default_year(project_root: Path) -> int:
     except (OSError, ValueError, TypeError):
         pass
     return date.today().year
+
+
+def load_business_province_mapping(path: Path) -> dict[str, str]:
+    """读取 process_data.py 生成的网点到业务省区映射。"""
+    if not path.is_file():
+        raise FileNotFoundError(f"未找到网点归属映射，请先运行 process_data.py：{path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise LongOrderFormatError(f"网点归属映射读取失败：{path}") from error
+    if not isinstance(payload, dict):
+        raise LongOrderFormatError(f"网点归属映射格式错误，根节点必须是对象：{path}")
+    mapping: dict[str, str] = {}
+    for branch, item in payload.items():
+        if not isinstance(item, dict):
+            continue
+        branch_name = text(branch)
+        if branch_name:
+            mapping[branch_name] = text(item.get("province"))
+    return mapping
 
 
 def parse_source_day(path: Path, year: int) -> str:
@@ -266,8 +286,6 @@ def read_one_source(day: str, path: Path, row_limit: int) -> dict[str, Any]:
             branch_rows[branch] = {
                 "date": day,
                 "source_rank": source_rank,
-                "province": text(values[columns[PROVINCE_HEADER]]),
-                "city": text(values[columns[CITY_HEADER]]),
                 "branch": branch,
                 "abnormal_count": count,
                 "expected_sign_count": expected_sign_count,
@@ -303,11 +321,19 @@ def write_trimmed_workbook(path: Path, headers: list[str], rows: list[list[Any]]
     workbook.close()
 
 
-def build_payload(records: list[dict[str, Any]], generated_at: str, year: int, row_limit: int) -> dict[str, Any]:
+def build_payload(
+    records: list[dict[str, Any]],
+    generated_at: str,
+    year: int,
+    row_limit: int,
+    business_provinces: dict[str, str],
+) -> dict[str, Any]:
     trends: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         for branch, point in record["branch_rows"].items():
-            trends[branch].append(dict(point))
+            enriched = dict(point)
+            enriched["business_province"] = business_provinces.get(branch, "")
+            trends[branch].append(enriched)
     for points in trends.values():
         points.sort(key=lambda item: item["date"])
     ordered_trends = {branch: trends[branch] for branch in sorted(trends)}
@@ -382,12 +408,14 @@ def run(args: argparse.Namespace) -> int:
     source_dir = args.source_dir or data_source_dir / "数据源-手动更新" / "超长单-手动更新"
     processed_dir = args.processed_dir or data_source_dir / "脚本处理后输出" / "超长单-脚本处理后"
     output_path = args.output or project_root / "data" / "dashboard_long_order.js"
+    mapping_path = project_root / "data" / "branch_mapping.json"
     year = args.year or default_year(project_root)
     row_limit = DATA_ROW_LIMIT
     records = collect_records(source_dir, processed_dir, year, row_limit)
+    business_provinces = load_business_province_mapping(mapping_path)
     current_records = [record for record in records if record["source_path"].parent == source_dir]
     generated_at = datetime.now().replace(microsecond=0).isoformat(sep=" ")
-    payload = build_payload(records, generated_at, year, row_limit)
+    payload = build_payload(records, generated_at, year, row_limit, business_provinces)
     summary = payload["long_order_meta"]
     print(
         f"源文件 {summary['source_file_count']} 个，日期 {summary['source_dates'][0]} 至 "

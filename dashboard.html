@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=30">
+  <link rel="stylesheet" href="assets/dashboard.css?v=31">
 </head>
 <body>
   <div class="page-load-progress" id="pageLoadProgress" role="progressbar" aria-label="正在准备看板" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
@@ -246,6 +246,26 @@
         </div>
         <div class="section-status"><span class="status-dot active"></span><span id="longOrderStatus">超长单数据载入中</span></div>
       </div>
+      <div class="branch-search-card long-order-search-card">
+        <div class="branch-search-copy">
+          <span>网点检索</span>
+          <h3>搜索当前日期的超长单机构</h3>
+          <p>输入机构或省区名称，直接筛选当前抖音数据日的超长单 TOP1000。</p>
+        </div>
+        <div class="branch-search-control">
+          <div class="search-control-row">
+            <label class="branch-search-input" for="longOrderSearch">
+              <span class="search-glyph" aria-hidden="true"></span>
+              <input id="longOrderSearch" type="search" autocomplete="off" placeholder="搜索机构名称，如：佛山南海" aria-controls="longOrderBody">
+              <button id="clearLongOrderSearch" type="button" hidden>清除</button>
+            </label>
+            <select id="longOrderProvinceFilter" class="province-filter" aria-label="超长单省区筛选器">
+              <option value="">省区筛选器</option>
+            </select>
+          </div>
+          <span class="branch-search-hint" id="longOrderSearchHint">超长单数据载入中</span>
+        </div>
+      </div>
       <article class="data-card data-card-wide">
         <div class="card-toolbar">
           <div>
@@ -256,7 +276,7 @@
         </div>
         <div class="table-scroll">
           <table class="data-table long-order-table">
-            <thead><tr><th>省份</th><th>城市</th><th>机构</th><th>超长单异常运单数</th><th>超长单应签运单总数</th><th>超长单异常率</th><th>停滞积分</th><th>36H超时量</th><th>36H超时率</th><th>近期日均超长单</th></tr></thead>
+            <thead><tr><th>序号</th><th>省区</th><th>机构</th><th>超长单异常运单数</th><th>超长单应签运单总数</th><th>超长单异常率</th><th>停滞积分</th><th>36H超时量</th><th>36H超时率</th><th>近期日均超长单</th></tr></thead>
             <tbody id="longOrderBody"></tbody>
           </table>
         </div>
@@ -395,6 +415,6 @@
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=18"></script>
   <script src="assets/dashboard-loader.js?v=3"></script>
-  <script src="assets/dashboard.js?v=39"></script>
+  <script src="assets/dashboard.js?v=40"></script>
 </body>
 </html>

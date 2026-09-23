@@ -98,6 +98,19 @@
       || numeric(right.abnormal_rate) - numeric(left.abnormal_rate)
       || rank(left.source_rank) - rank(right.source_rank)
       || String(left.branch || '').localeCompare(String(right.branch || ''), 'zh-CN')
+    )).map((row, index) => ({ ...row, rank: index + 1 }));
+  }
+  function longOrderRowMatchesQuery(row, query = state.longOrderQuery) {
+    const normalized = String(query || '').trim().toLocaleLowerCase('zh-CN');
+    if (!normalized) return true;
+    return `${row?.business_province || ''} ${row?.branch || ''}`
+      .toLocaleLowerCase('zh-CN')
+      .includes(normalized);
+  }
+  function filteredLongOrderRows(rows) {
+    return (rows || []).filter(row => (
+      (!state.longOrderProvince || provinceKey(row?.business_province) === state.longOrderProvince)
+      && longOrderRowMatchesQuery(row)
     ));
   }
   function optionalFiniteNumber(value) {
@@ -207,7 +220,7 @@
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
-  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, longOrderPage: 1, longOrderPageSize: 10, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
+  const state = { platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1, branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端', deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1, topPage: 1, longOrderQuery: '', longOrderProvince: '', longOrderPage: 1, longOrderPageSize: 10, jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48, topPageSize: 10, jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days };
   let chartJobs = [];
   let toastTimer = null;
   let longOrderLoadError = null;
@@ -668,6 +681,7 @@
       state.platformQuery = '';
       state.platformProvince = '';
       state.branchProvince = '';
+      state.longOrderProvince = '';
       state.deliveryQuery = '';
       state.deliveryProvince = '';
       $$('.segment', $('#platformSwitcher')).forEach(item => {
@@ -711,6 +725,7 @@
       state.extremePage = 1;
       state.platformProvince = '';
       state.branchProvince = '';
+      state.longOrderProvince = '';
       state.deliveryProvince = '';
       state.deliveryControlPage = 1;
       state.deliveryHighScorePage = 1;
@@ -854,6 +869,31 @@
       renderBranchSearch();
       $('#branchSearch').focus();
     });
+    $('#longOrderSearch')?.addEventListener('input', event => {
+      state.longOrderQuery = event.target.value;
+      state.longOrderPage = 1;
+      renderLongOrderModule();
+    });
+    $('#longOrderProvinceFilter')?.addEventListener('change', event => {
+      state.longOrderProvince = event.target.value;
+      state.longOrderPage = 1;
+      renderLongOrderModule();
+    });
+    $('#longOrderSearch')?.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !state.longOrderQuery) return;
+      event.stopPropagation();
+      state.longOrderQuery = '';
+      event.target.value = '';
+      state.longOrderPage = 1;
+      renderLongOrderModule();
+    });
+    $('#clearLongOrderSearch')?.addEventListener('click', () => {
+      state.longOrderQuery = '';
+      $('#longOrderSearch').value = '';
+      state.longOrderPage = 1;
+      renderLongOrderModule();
+      $('#longOrderSearch').focus();
+    });
     $("#topPageSize")?.addEventListener("change", event => {
       const value = Number(event.target.value);
       if (!TOP_PAGE_SIZES.includes(value)) return;
@@ -966,6 +1006,7 @@
     state.extremePage = 1;
     state.platformProvince = '';
     state.branchProvince = '';
+    state.longOrderProvince = '';
     state.deliveryProvince = '';
     state.topPage = 1;
     state.longOrderPage = 1;
@@ -1479,6 +1520,33 @@
     container.innerHTML = `<div class="long-order-page-numbers"><button class="page-button" type="button" data-kind="long-order" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="上一页">‹</button>${numbers}<button class="page-button" type="button" data-kind="long-order" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''} aria-label="下一页">›</button></div><label class="long-order-page-size" for="longOrderPageSize"><select id="longOrderPageSize" aria-label="超长单监控每页条数">${sizes}</select></label>`;
   }
 
+  function renderLongOrderSearch(rows, ready) {
+    const input = $('#longOrderSearch');
+    const clear = $('#clearLongOrderSearch');
+    const select = $('#longOrderProvinceFilter');
+    if (!input || !clear || !select) return ready ? filteredLongOrderRows(rows) : [];
+    if (input.value !== state.longOrderQuery) input.value = state.longOrderQuery;
+    clear.hidden = !state.longOrderQuery;
+    input.disabled = !ready;
+    select.disabled = !ready;
+    if (!ready) {
+      state.longOrderProvince = renderProvinceFilter('#longOrderProvinceFilter', [], state.longOrderProvince);
+      setText('#longOrderSearchHint', longOrderLoadError ? '超长单数据加载失败，暂时无法筛选' : '超长单数据载入中');
+      return [];
+    }
+    state.longOrderProvince = renderProvinceFilter(
+      '#longOrderProvinceFilter',
+      rows.map(row => ({ province: row.business_province || '' })),
+      state.longOrderProvince
+    );
+    const filtered = filteredLongOrderRows(rows);
+    const hasFilters = Boolean(String(state.longOrderQuery || '').trim() || state.longOrderProvince);
+    if (!rows.length) setText('#longOrderSearchHint', '当前日期暂无可检索的超长单记录');
+    else if (hasFilters) setText('#longOrderSearchHint', `找到 ${formatNumber(filtered.length)} 条匹配记录`);
+    else setText('#longOrderSearchHint', `覆盖 ${formatNumber(rows.length)} 条 TOP1000 记录 · 支持机构与省区名称`);
+    return filtered;
+  }
+
   function renderLongOrderModule() {
     const active = state.platform === '\u6296\u97f3' && !isTdayActive();
     const section = $('#long-order-monitor');
@@ -1492,6 +1560,7 @@
     setText('#longOrderDate', state.date || '—');
     setText('#longOrderCaption', `按超长单异常运单数降序展示 TOP${Number(data.long_order_meta?.row_limit || 1000)} 条记录`);
     if (!longOrderDataReady()) {
+      renderLongOrderSearch([], false);
       setText('#longOrderStatus', longOrderLoadError ? '超长单数据加载失败' : '超长单数据载入中');
       setText('#longOrderCount', '0 条');
       if (body) body.innerHTML = `<tr class="empty-row"><td colspan="10">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
@@ -1499,9 +1568,11 @@
       return;
     }
 
-    const rows = longOrderRowsForDate(state.date);
-    setText('#longOrderCount', `${rows.length} 条`);
-    if (!rows.length) {
+    const allRows = longOrderRowsForDate(state.date);
+    const rows = renderLongOrderSearch(allRows, true);
+    const hasFilters = Boolean(String(state.longOrderQuery || '').trim() || state.longOrderProvince);
+    setText('#longOrderCount', hasFilters ? `${rows.length} / ${allRows.length} 条` : `${allRows.length} 条`);
+    if (!allRows.length) {
       const sourceDates = data.long_order_meta?.source_dates || [];
       setText('#longOrderStatus', sourceDates.includes(state.date) ? '当前日期暂无超长单记录' : '当前日期无超长单源数据');
       if (body) body.innerHTML = '<tr class="empty-row"><td colspan="10">当前日期暂无可展示的超长单记录</td></tr>';
@@ -1510,6 +1581,11 @@
     }
 
     setText('#longOrderStatus', `超长单数据已接入 · ${shortDate(state.date)}`);
+    if (!rows.length) {
+      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="10">当前搜索与省区筛选条件下暂无匹配记录</td></tr>';
+      if (pagination) pagination.innerHTML = '';
+      return;
+    }
     const pageSize = LONG_ORDER_PAGE_SIZES.includes(Number(state.longOrderPageSize)) ? Number(state.longOrderPageSize) : 10;
     state.longOrderPageSize = pageSize;
     const pages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -1519,7 +1595,7 @@
       body.innerHTML = pageRows.map(row => {
         const level = row.abnormal_level === null || row.abnormal_level === undefined || row.abnormal_level === '' ? '—' : row.abnormal_level;
         const metrics = longOrderMetrics(row.branch, state.date);
-        return `<tr><td class="province-cell">${provinceCell(row.province)}</td><td>${escapeHtml(row.city || '—')}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td><td>${scoreChip(metrics.stagnantScore)}</td><td><span class="metric-number">${formatOptionalNumber(metrics.timeout36h)}</span></td><td><span class="rate">${formatOptionalRate(metrics.timeoutRate36h)}</span></td><td><span class="metric-number">${formatOptionalNumber(metrics.recentAverage)}</span></td></tr>`;
+        return `<tr><td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.business_province)}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td><td>${scoreChip(metrics.stagnantScore)}</td><td><span class="metric-number">${formatOptionalNumber(metrics.timeout36h)}</span></td><td><span class="rate">${formatOptionalRate(metrics.timeoutRate36h)}</span></td><td><span class="metric-number">${formatOptionalNumber(metrics.recentAverage)}</span></td></tr>`;
       }).join('');
     }
     renderLongOrderPagination(pagination, state.longOrderPage, pages);

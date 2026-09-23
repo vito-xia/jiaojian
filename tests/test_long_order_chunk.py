@@ -31,10 +31,16 @@ class LongOrderChunkTests(unittest.TestCase):
             workbook.close()
 
             record = read_one_source("2026-09-20", path, row_limit=3)
-            payload = build_payload([record], "2026-09-21 12:00:00", 2026, 3)
+            payload = build_payload(
+                [record],
+                "2026-09-21 12:00:00",
+                2026,
+                3,
+                {"机构甲": "义乌", "机构丙": "苏南"},
+            )
 
         points = payload["long_order_trends"]
-        self.assertEqual(payload["long_order_meta"]["schema_version"], 2)
+        self.assertEqual(payload["long_order_meta"]["schema_version"], 3)
         self.assertEqual(set(points), {"机构甲", "机构乙", "机构丙"})
         self.assertEqual(points["机构丙"][0]["source_rank"], 1)
         self.assertEqual(points["机构甲"][0]["source_rank"], 2)
@@ -44,10 +50,14 @@ class LongOrderChunkTests(unittest.TestCase):
         self.assertEqual(points["机构甲"][0]["expected_sign_count"], 10)
         self.assertEqual(points["机构甲"][0]["abnormal_rate"], 0)
         self.assertEqual(points["机构甲"][0]["abnormal_level"], "无异常")
+        self.assertEqual(points["机构甲"][0]["business_province"], "义乌")
+        self.assertEqual(points["机构乙"][0]["business_province"], "")
         self.assertIsNone(points["机构乙"][0]["abnormal_count"])
         self.assertIsNone(points["机构乙"][0]["expected_sign_count"])
         self.assertIsNone(points["机构乙"][0]["abnormal_rate"])
         self.assertIsNone(points["机构乙"][0]["abnormal_level"])
+        self.assertNotIn("province", points["机构甲"][0])
+        self.assertNotIn("city", points["机构甲"][0])
         self.assertNotIn("剔除不可抗力异常率", points["机构甲"][0])
         self.assertNotIn("操作", points["机构甲"][0])
 
