@@ -36,7 +36,7 @@ RATE_HEADER = "超长单异常率"
 ABNORMAL_LEVEL_HEADER = "超长单异常率-异常等级"
 DATA_ROW_LIMIT = 1000
 CHUNK_NAME = "long-order"
-PAYLOAD_SCHEMA_VERSION = 3
+PAYLOAD_SCHEMA_VERSION = 4
 SOURCE_FILE_PATTERN = re.compile(r"^(?P<month>\d{1,2})月(?P<day>\d{1,2})日\.xlsx$", re.IGNORECASE)
 EMPTY_VALUES = {"", "-", "--", "—", "/", "无", "暂无", "null", "none", "nan"}
 
@@ -329,11 +329,35 @@ def build_payload(
     business_provinces: dict[str, str],
 ) -> dict[str, Any]:
     trends: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for record in records:
+    previous_day: date | None = None
+    previous_streaks: dict[str, int] = {}
+    ordered_records = sorted(records, key=lambda record: record["date"])
+    for record in ordered_records:
+        current_day = date.fromisoformat(record["date"])
+        if previous_day is None or (current_day - previous_day).days != 1:
+            previous_streaks = {}
+        ranked_branches = sorted(
+            record["branch_rows"],
+            key=lambda branch: (
+                record["branch_rows"][branch]["abnormal_count"] is None,
+                -(record["branch_rows"][branch]["abnormal_count"] or 0),
+                record["branch_rows"][branch]["abnormal_rate"] is None,
+                -(record["branch_rows"][branch]["abnormal_rate"] or 0),
+                record["branch_rows"][branch]["source_rank"],
+                branch,
+            ),
+        )
+        current_streaks = {
+            branch: previous_streaks.get(branch, 0) + 1
+            for branch in ranked_branches[:10]
+        }
         for branch, point in record["branch_rows"].items():
             enriched = dict(point)
             enriched["business_province"] = business_provinces.get(branch, "")
+            enriched["top10_streak"] = current_streaks.get(branch, 0)
             trends[branch].append(enriched)
+        previous_day = current_day
+        previous_streaks = current_streaks
     for points in trends.values():
         points.sort(key=lambda item: item["date"])
     ordered_trends = {branch: trends[branch] for branch in sorted(trends)}
@@ -344,8 +368,8 @@ def build_payload(
             "generated_at": generated_at,
             "year": year,
             "row_limit": row_limit,
-            "source_file_count": len(records),
-            "source_dates": [record["date"] for record in records],
+            "source_file_count": len(ordered_records),
+            "source_dates": [record["date"] for record in ordered_records],
             "source_row_count": sum(len(record["rows"]) for record in records),
             "source_branch_row_count": sum(len(record["branch_rows"]) for record in records),
             "warning_count": sum(len(record["warnings"]) for record in records),

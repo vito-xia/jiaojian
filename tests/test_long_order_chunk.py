@@ -40,7 +40,7 @@ class LongOrderChunkTests(unittest.TestCase):
             )
 
         points = payload["long_order_trends"]
-        self.assertEqual(payload["long_order_meta"]["schema_version"], 3)
+        self.assertEqual(payload["long_order_meta"]["schema_version"], 4)
         self.assertEqual(set(points), {"机构甲", "机构乙", "机构丙"})
         self.assertEqual(points["机构丙"][0]["source_rank"], 1)
         self.assertEqual(points["机构甲"][0]["source_rank"], 2)
@@ -51,6 +51,7 @@ class LongOrderChunkTests(unittest.TestCase):
         self.assertEqual(points["机构甲"][0]["abnormal_rate"], 0)
         self.assertEqual(points["机构甲"][0]["abnormal_level"], "无异常")
         self.assertEqual(points["机构甲"][0]["business_province"], "义乌")
+        self.assertEqual(points["机构甲"][0]["top10_streak"], 1)
         self.assertEqual(points["机构乙"][0]["business_province"], "")
         self.assertIsNone(points["机构乙"][0]["abnormal_count"])
         self.assertIsNone(points["机构乙"][0]["expected_sign_count"])
@@ -60,6 +61,44 @@ class LongOrderChunkTests(unittest.TestCase):
         self.assertNotIn("city", points["机构甲"][0])
         self.assertNotIn("剔除不可抗力异常率", points["机构甲"][0])
         self.assertNotIn("操作", points["机构甲"][0])
+
+    def test_top10_streak_uses_display_ranking_and_breaks_on_absence_or_date_gap(self):
+        def record(day, high_rate=0.9, low_rate=0.1):
+            rows = []
+            for source_rank in range(1, 10):
+                rows.append((f"领先机构{source_rank}", 100 - source_rank, 1.0))
+            rows.extend([("临界低", 5, low_rate), ("临界高", 5, high_rate)])
+            return {
+                "date": day,
+                "rows": rows,
+                "warnings": [],
+                "branch_rows": {
+                    branch: {
+                        "date": day,
+                        "source_rank": source_rank,
+                        "branch": branch,
+                        "abnormal_count": count,
+                        "abnormal_rate": rate,
+                    }
+                    for source_rank, (branch, count, rate) in enumerate(rows, 1)
+                },
+            }
+
+        records = [
+            record("2026-09-06"),
+            record("2026-09-03", low_rate=0.9),
+            record("2026-09-02"),
+            record("2026-09-04"),
+            record("2026-09-01"),
+        ]
+        payload = build_payload(records, "2026-09-07 12:00:00", 2026, 1000, {})
+        points = payload["long_order_trends"]
+        self.assertEqual(payload["long_order_meta"]["source_dates"], [
+            "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-06",
+        ])
+        self.assertEqual([point["top10_streak"] for point in points["临界高"]], [1, 2, 0, 1, 1])
+        self.assertEqual([point["top10_streak"] for point in points["临界低"]], [0, 0, 1, 0, 0])
+        self.assertEqual([point["top10_streak"] for point in points["领先机构1"]], [1, 2, 3, 4, 1])
 
     def test_top_limit_is_applied_after_count_sort(self):
         headers = [

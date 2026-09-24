@@ -494,7 +494,34 @@ def read_timeout(timeout_dir: Path, year: int) -> list[dict[str, Any]]:
         record_date = date(year, int(month), int(day)).isoformat()
         workbook = load_workbook(path, read_only=True, data_only=True)
         sheet = workbook.active
-        for row in sheet.iter_rows(min_row=3, values_only=True):
+        headers = list(sheet.iter_rows(min_row=1, max_row=3, max_col=13, values_only=True))
+        basic_headers = ("序号", "分部", "客户", "客户编码", "是否配置发运兜底", "是否历史有单无货")
+        if not headers or tuple(headers[0][:6]) != basic_headers:
+            workbook.close()
+            raise ValueError(f"{path.name} 的 T-1 基础表头不符合已知模板")
+        if len(headers) >= 2 and headers[1][6] == "票件量A":
+            header_rows = 2
+        elif len(headers) >= 3 and headers[2][6] == "票件量A":
+            header_rows = 3
+        else:
+            workbook.close()
+            raise ValueError(f"{path.name} 的 T-1 指标表头不符合已知模板")
+        expected_rate = "超时率B/C" if header_rows == 2 else "超时率"
+        if headers[header_rows - 1][7:9] != ("超时量B", expected_rate):
+            workbook.close()
+            raise ValueError(f"{path.name} 的 T-1 量率列不符合已知模板")
+        expected_groups = {
+            7: "揽收->入首分拨(工单列)",
+            8: "揽收->入首分拨(超时列)",
+            10: "揽收->入首分拨(第三列)",
+            11: "揽收->入首分拨(第四列)",
+            12: "揽收->入首分拨(第五列)",
+            13: "揽收->入首分拨(第六列)",
+        }
+        if any(headers[header_rows - 2][col - 1] != label for col, label in expected_groups.items()):
+            workbook.close()
+            raise ValueError(f"{path.name} 的 T-1 交件指标列顺序不符合已知模板")
+        for row in sheet.iter_rows(min_row=header_rows + 1, values_only=True):
             if not row or text(row[1] if len(row) > 1 else "") in ("", "合计"):
                 continue
             record = {

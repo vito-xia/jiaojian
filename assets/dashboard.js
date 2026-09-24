@@ -1563,7 +1563,7 @@
       renderLongOrderSearch([], false);
       setText('#longOrderStatus', longOrderLoadError ? '超长单数据加载失败' : '超长单数据载入中');
       setText('#longOrderCount', '0 条');
-      if (body) body.innerHTML = `<tr class="empty-row"><td colspan="10">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
+      if (body) body.innerHTML = `<tr class="empty-row"><td colspan="11">${longOrderLoadError ? '超长单数据分片加载失败，请刷新页面重试' : '正在加载超长单数据…'}</td></tr>`;
       if (pagination) pagination.innerHTML = '';
       return;
     }
@@ -1575,14 +1575,14 @@
     if (!allRows.length) {
       const sourceDates = data.long_order_meta?.source_dates || [];
       setText('#longOrderStatus', sourceDates.includes(state.date) ? '当前日期暂无超长单记录' : '当前日期无超长单源数据');
-      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="10">当前日期暂无可展示的超长单记录</td></tr>';
+      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="11">当前日期暂无可展示的超长单记录</td></tr>';
       if (pagination) pagination.innerHTML = '';
       return;
     }
 
     setText('#longOrderStatus', `超长单数据已接入 · ${shortDate(state.date)}`);
     if (!rows.length) {
-      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="10">当前搜索与省区筛选条件下暂无匹配记录</td></tr>';
+      if (body) body.innerHTML = '<tr class="empty-row"><td colspan="11">当前搜索与省区筛选条件下暂无匹配记录</td></tr>';
       if (pagination) pagination.innerHTML = '';
       return;
     }
@@ -1595,7 +1595,7 @@
       body.innerHTML = pageRows.map(row => {
         const level = row.abnormal_level === null || row.abnormal_level === undefined || row.abnormal_level === '' ? '—' : row.abnormal_level;
         const metrics = longOrderMetrics(row.branch, state.date);
-        return `<tr><td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.business_province)}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td><td>${scoreChip(metrics.stagnantScore)}</td><td><span class="metric-number">${formatOptionalNumber(metrics.timeout36h)}</span></td><td><span class="rate">${formatOptionalRate(metrics.timeoutRate36h)}</span></td><td><span class="metric-number">${formatOptionalNumber(metrics.recentAverage)}</span></td></tr>`;
+        return `<tr><td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.business_province)}</td><td>${branchButton(row.branch, '', 'pickup', false)}</td><td><span class="metric-number">${formatOptionalNumber(row.top10_streak)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.abnormal_count)}</span></td><td><span class="metric-number">${formatOptionalNumber(row.expected_sign_count)}</span></td><td><span class="rate">${formatOptionalRate(row.abnormal_rate)}</span><span class="subline">${escapeHtml(level)}</span></td><td>${scoreChip(metrics.stagnantScore)}</td><td><span class="metric-number">${formatOptionalNumber(metrics.recentAverage)}</span></td><td><span class="metric-number">${formatOptionalNumber(metrics.timeout36h)}</span></td><td><span class="rate">${formatOptionalRate(metrics.timeoutRate36h)}</span></td></tr>`;
       }).join('');
     }
     renderLongOrderPagination(pagination, state.longOrderPage, pages);
