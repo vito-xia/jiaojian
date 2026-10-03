@@ -16,6 +16,7 @@
     'drawer-taobao': 'dashboard_drawer_taobao.js',
     'drawer-jd': 'dashboard_drawer_jd.js',
     'drawer-kuaishou': 'dashboard_drawer_kuaishou.js',
+    'warning-range': 'dashboard_warning_range.js',
     tday: 'dashboard_tday.js',
     'long-order': 'dashboard_long_order.js'
   });

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=33">
+  <link rel="stylesheet" href="assets/dashboard.css?v=34">
 </head>
 <body>
   <div class="page-load-progress" id="pageLoadProgress" role="progressbar" aria-label="正在准备看板" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
@@ -204,6 +204,16 @@
       </div>
       <div class="branch-search-results" id="branchSearchResults" aria-live="polite" hidden></div>
       <article class="data-card data-card-wide">
+        <div class="range-filter-bar" id="warningRangeFilter" hidden>
+          <div class="range-filter-copy"><strong>交件统计区间</strong><span>区间量累计，区间率按估算发货量加权</span></div>
+          <div class="range-filter-fields">
+            <label><span>开始日期</span><input id="warningRangeStart" type="date" aria-label="交件预警开始日期"></label>
+            <i>至</i>
+            <label><span>结束日期</span><input id="warningRangeEnd" type="date" aria-label="交件预警结束日期"></label>
+            <button class="range-apply" id="applyWarningRange" type="button">应用</button>
+            <button class="range-reset" id="resetWarningRange" type="button">重置</button>
+          </div>
+        </div>
         <div class="card-toolbar">
           <div>
             <h3><span id="top10Platform">抖音</span> · <span id="top10Date">—</span></h3>
@@ -242,15 +252,15 @@
         <div>
           <div class="section-kicker"><span class="kicker-index blue">03</span>超长单监控</div>
           <h2>超长单监控</h2>
-          <p>按当前抖音数据日展示列表数据中按超长单异常运单数降序排列的 TOP1000 超长单记录，点击机构查看网点详情与趋势。</p>
+          <p>按所选统计日期展示超长单异常运单数排名 TOP1000，点击机构查看结束日的网点详情与趋势。</p>
         </div>
         <div class="section-status"><span class="status-dot active"></span><span id="longOrderStatus">超长单数据载入中</span></div>
       </div>
       <div class="branch-search-card long-order-search-card">
         <div class="branch-search-copy">
           <span>网点检索</span>
-          <h3>搜索当前日期的超长单机构</h3>
-          <p>输入机构或省区名称，直接筛选当前抖音数据日的超长单 TOP1000。</p>
+          <h3>搜索所选区间的超长单机构</h3>
+          <p>输入机构或省区名称，直接筛选当前统计结果的 TOP1000。</p>
         </div>
         <div class="branch-search-control">
           <div class="search-control-row">
@@ -267,6 +277,16 @@
         </div>
       </div>
       <article class="data-card data-card-wide">
+        <div class="range-filter-bar" id="longOrderRangeFilter" hidden>
+          <div class="range-filter-copy"><strong>超长单统计区间</strong><span>按每日 TOP1000 逐日累计，日状态取结束日</span></div>
+          <div class="range-filter-fields">
+            <label><span>开始日期</span><input id="longOrderRangeStart" type="date" aria-label="超长单开始日期"></label>
+            <i>至</i>
+            <label><span>结束日期</span><input id="longOrderRangeEnd" type="date" aria-label="超长单结束日期"></label>
+            <button class="range-apply" id="applyLongOrderRange" type="button">应用</button>
+            <button class="range-reset" id="resetLongOrderRange" type="button">重置</button>
+          </div>
+        </div>
         <div class="card-toolbar">
           <div>
             <h3>抖音 · <span id="longOrderDate">—</span></h3>
@@ -281,6 +301,7 @@
           </table>
         </div>
         <div class="pagination long-order-pagination" id="longOrderPagination" aria-label="超长单监控分页"></div>
+        <div class="card-footnote" id="longOrderFootnote"></div>
       </article>
     </section>
 
@@ -413,8 +434,8 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
-  <script src="data/dashboard_bundle.js?v=18"></script>
-  <script src="assets/dashboard-loader.js?v=3"></script>
-  <script src="assets/dashboard.js?v=42"></script>
+  <script src="data/dashboard_bundle.js?v=19"></script>
+  <script src="assets/dashboard-loader.js?v=4"></script>
+  <script src="assets/dashboard.js?v=43"></script>
 </body>
 </html>

@@ -483,7 +483,18 @@ def locate(data_dir: Path, prefix: str) -> Path:
     return matches[0]
 
 
-def read_timeout(timeout_dir: Path, year: int) -> list[dict[str, Any]]:
+def optional_source_number(value: Any) -> float | None:
+    """Keep missing source cells separate from real zero for range statistics."""
+    if value is None or text(value) in EMPTY_DETAIL_VALUES:
+        return None
+    try:
+        amount = float(str(value).replace(",", "").replace("%", ""))
+        return amount if math.isfinite(amount) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def read_timeout(timeout_dir: Path, year: int, range_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     platform_pattern = "|".join(re.escape(platform) for platform in PLATFORMS)
     for path in sorted(timeout_dir.glob("*.xlsx")):
@@ -549,6 +560,14 @@ def read_timeout(timeout_dir: Path, year: int) -> list[dict[str, Any]]:
                     record["timeout_96h"],
                 ))
             records.append(record)
+            if range_rows is not None and platform == "抖音":
+                count = optional_source_number(row[7])
+                rate = optional_source_number(row[8])
+                range_rows.append({
+                    **record,
+                    "timeout_36h": round(count) if count is not None else None,
+                    "timeout_rate_36h": round(rate, 4) if rate is not None else None,
+                })
         workbook.close()
     return records
 
@@ -1144,6 +1163,90 @@ def build_trends(
     return result
 
 
+def build_warning_range_data(
+    timeout_rows: list[dict[str, Any]],
+    mapping: dict[str, dict[str, str]],
+    customer_metadata: dict[str, dict[tuple[str, ...], tuple[str, int, str]]],
+    current_controls: dict[str, dict[str, Any]],
+    merchant_counts: dict[str, int],
+    parent_clear: dict[str, dict[str, Any]],
+    branch_clear_counts: dict[str, int],
+    shortage: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the lazily loaded, unranked Douyin rows used by custom ranges."""
+    customers: dict[tuple[str, str, str], dict[str, Any]] = {}
+    dates: set[str] = set()
+    for position, row in enumerate(timeout_rows):
+        if row.get("platform") != "抖音":
+            continue
+        branch = text(row.get("branch"))
+        customer = text(row.get("customer"))
+        customer_code = text(row.get("customer_code"))
+        day = text(row.get("date"))
+        if not branch or not customer or not day:
+            continue
+        dates.add(day)
+        identity_kind = "code" if customer_code else "name"
+        identity_value = customer_code or customer
+        key = (branch, identity_kind, identity_value)
+        box = customers.setdefault(key, {
+            "branch": branch,
+            "customer": customer,
+            "customer_code": customer_code,
+            "points": [],
+            "_latest": ("", -1),
+            "_latest_row": row,
+        })
+        marker = (day, position)
+        if marker >= box["_latest"]:
+            box["customer"] = customer
+            box["customer_code"] = customer_code
+            box["_latest"] = marker
+            box["_latest_row"] = row
+        box["points"].append((day, position, row.get("timeout_36h"), row.get("timeout_rate_36h"), customer))
+
+    payload_customers = []
+    for box in customers.values():
+        default_name = box["customer"]
+        points = []
+        for day, _, count, rate, point_name in sorted(box["points"], key=lambda item: (item[0], item[1])):
+            point = [day, count, rate]
+            if point_name != default_name:
+                point.append(point_name)
+            points.append(point)
+        payload_customers.append({
+            "branch": box["branch"],
+            "customer": default_name,
+            "customer_code": box["customer_code"],
+            "has_shipping_fallback": latest_shipping_fallback(box["_latest_row"], customer_metadata),
+            "points": points,
+        })
+    payload_customers.sort(key=lambda item: (item["branch"], item["customer_code"] or "", item["customer"]))
+
+    branches = {}
+    for branch in sorted({item["branch"] for item in payload_customers}):
+        parent = parent_of(branch, mapping)
+        clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
+        control = current_controls.get(branch, {"action": ""})
+        branches[branch] = {
+            "province": province_of(branch, mapping),
+            "parent_name": parent,
+            "current_control": control.get("action", ""),
+            "merchant_control_count": merchant_counts.get(branch, 0),
+            "branch_clearout_count": branch_clear_counts.get(branch, 0),
+            "clearout_count": clear["count"],
+            "last_clearout_date": clear["last_date"],
+            "last_clearout_type": clear["last_type"],
+            "history_shortage": shortage.get("抖音", {}).get(parent) or {"months": [], "branches": [], "customer_count": 0},
+        }
+    return {
+        "schema_version": 1,
+        "dates": sorted(dates),
+        "customers": payload_customers,
+        "branches": branches,
+    }
+
+
 def build_branch_score_trends(score_rows: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
     work: dict[str, dict[str, dict[str, dict[str, Any]]]] = defaultdict(lambda: defaultdict(dict))
     for row in score_rows:
@@ -1194,7 +1297,7 @@ def build_branch_score_trends(score_rows: list[dict[str, Any]]) -> dict[str, dic
     return result
 
 
-def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of: str, bad_top5_dates: int):
+def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of: str, bad_top5_dates: int, warning_range_rows=None):
     raw_timeout_count = len(timeout_rows)
     raw_top5_count = len(top5)
     timeout_rows = [row for row in timeout_rows if not customer_is_excluded(row["customer"])]
@@ -1330,6 +1433,11 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
     platform_payloads = {p: {"dates": dates_by_platform[p], "top10_by_date": top10_by_date[p]} for p in PLATFORMS}
     for platform, rows_by_date in top60_by_date.items():
         platform_payloads[platform]["top60_by_date"] = rows_by_date
+    warning_range = build_warning_range_data(
+        [row for row in warning_range_rows if not customer_is_excluded(row["customer"])] if warning_range_rows is not None else timeout_rows,
+        mapping, customer_metadata, current_controls, merchant_counts,
+        parent_clear, branch_clear_counts, shortage,
+    )
     return {
         "meta": {
             "as_of": as_of, "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1357,6 +1465,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         "branch_top5_data": branch_top5_data,
         "branch_score_trends": build_branch_score_trends(score_rows),
         "trends": build_trends(timeout_rows, mapping, customer_metadata),
+        "warning_range": warning_range,
         "delivery_monitor": delivery_monitor,
     }
 
@@ -1468,7 +1577,8 @@ def main() -> None:
     timeout_dir, manual_dir = resolve_source_layout(args.data_dir)
     print(f"T-1交件目录：{timeout_dir}")
     print(f"手动维护目录：{manual_dir}")
-    timeout_rows = read_timeout(timeout_dir, args.year)
+    warning_range_rows: list[dict[str, Any]] = []
+    timeout_rows = read_timeout(timeout_dir, args.year, warning_range_rows)
     if not timeout_rows:
         raise RuntimeError("未读取到交件超时数据")
     top5, branch_top5_rows, bad_dates = read_top5(manual_dir, args.year)
@@ -1483,7 +1593,7 @@ def main() -> None:
     long_order_processed_dir = args.data_dir / "脚本处理后输出" / "超长单-脚本处理后"
     long_order_records = collect_records(long_order_source_dir, long_order_processed_dir, args.year) if long_order_source_dir.is_dir() else []
     long_order_daily_counts = build_long_order_daily_counts(long_order_records)
-    dashboard = build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of, bad_dates)
+    dashboard = build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, daily_scores, cumulative_scores, controls, delivery_controls, delivery_score_rows, delivery_daily_scores, delivery_cumulative_scores, long_order_daily_counts, as_of, bad_dates, warning_range_rows)
     dashboard["delivery_monitor"]["score_headers"] = delivery_score_headers
     dashboard["meta"]["long_order_source"] = {
         "file_count": len(long_order_records),
@@ -1521,6 +1631,7 @@ def main() -> None:
             "extreme_records": dashboard["extreme_records"],
         }),
         "delivery": ("dashboard_delivery.js", {"delivery_monitor": dashboard["delivery_monitor"]}),
+        "warning-range": ("dashboard_warning_range.js", {"warning_range": dashboard["warning_range"]}),
     }
     for platform, (chunk_name, filename) in platform_files.items():
         generated_chunks[chunk_name] = (filename, {"platforms": {platform: dashboard["platforms"][platform]}})
