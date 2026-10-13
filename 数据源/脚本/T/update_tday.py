@@ -1186,7 +1186,7 @@ def main() -> int:
     parser.add_argument("--trace-file", type=Path, default=manual_source_dir / "T日内网轨迹.xlsx")
     parser.add_argument("--output", type=Path, default=base_dir / "data" / "dashboard_tday.js")
     parser.add_argument("--date", help="目标 T 日，默认使用本机当天日期")
-    parser.add_argument("--download", action="store_true", help="兼容参数：不再在此脚本下载，请先运行独立下载脚本")
+    parser.add_argument("--download", action="store_true", help="兼容参数：下载和生成由统一更新入口编排")
     parser.add_argument("--no-download", action="store_true", help="兼容参数：只处理本地内网轨迹（默认行为）")
     args = parser.parse_args()
     freshness_reasons = tday_source_freshness(args.link_file, args.trace_file)
@@ -1200,7 +1200,7 @@ def main() -> int:
 
     warnings: list[str] = []
     if args.download:
-        warnings.append("下载已拆分为独立脚本，请先运行数据源/下载T日数据.bat")
+        warnings.append("下载和生成由统一入口编排，请运行数据源/更新T日数据.bat")
     try:
         mapping = read_mapping(manual_source_dir)
     except Exception:

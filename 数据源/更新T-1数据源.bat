@@ -1,16 +1,15 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 chcp 65001 >nul
 set "NO_PAUSE="
 for %%A in (%*) do if /I "%%~A"=="--no-pause" set "NO_PAUSE=1"
-set "PROJECT_ROOT=%~dp0.."
-set "T1_SCRIPT=%~dp0脚本\T-1\更新T-1数据源.py"
-pushd "%PROJECT_ROOT%"
-if errorlevel 1 goto directory_failure
+for %%I in ("%~f0") do set "ENTRY_DIR=%%~dpI"
+for %%I in ("%ENTRY_DIR%脚本\run_update.py") do set "UPDATE_RUNNER=%%~fI"
+if not exist "%UPDATE_RUNNER%" goto runner_missing
 
-python.exe -X utf8 -c "import openpyxl" >nul 2>nul
+python.exe -B -X utf8 -c "import openpyxl" >nul 2>nul
 if not errorlevel 1 goto run_python
-py.exe -3 -X utf8 -c "import openpyxl" >nul 2>nul
+py.exe -3 -B -X utf8 -c "import openpyxl" >nul 2>nul
 if not errorlevel 1 goto run_py
 
 echo Python 3 with openpyxl was not found.
@@ -18,35 +17,28 @@ set "EXIT_CODE=9009"
 goto finish
 
 :run_python
-python.exe -X utf8 -u "%T1_SCRIPT%"
-set "EXIT_CODE=%ERRORLEVEL%"
-goto after_download
-
-:run_py
-py.exe -3 -X utf8 -u "%T1_SCRIPT%"
-set "EXIT_CODE=%ERRORLEVEL%"
-
-:after_download
-if not "%EXIT_CODE%"=="0" goto finish
-echo.
-echo Starting dashboard refresh...
-call "%PROJECT_ROOT%\更新看板数据.bat" --no-pause
+python.exe -B -X utf8 -u "%UPDATE_RUNNER%" t1 %*
 set "EXIT_CODE=%ERRORLEVEL%"
 goto finish
 
-:directory_failure
-set "EXIT_CODE=1"
+:run_py
+py.exe -3 -B -X utf8 -u "%UPDATE_RUNNER%" t1 %*
+set "EXIT_CODE=%ERRORLEVEL%"
+goto finish
+
+:runner_missing
+echo Update runner was not found.
+set "EXIT_CODE=2"
 
 :finish
-popd
 if not "%EXIT_CODE%"=="0" goto failure
 echo.
-echo T-1 source download and dashboard refresh completed successfully.
+echo T-1 workflow and output validation completed successfully.
 goto pause_or_exit
 
 :failure
 echo.
-echo T-1 source download or dashboard refresh failed. Exit code: %EXIT_CODE%
+echo T-1 workflow failed. Exit code: %EXIT_CODE%. See the update log for the failed stage.
 
 :pause_or_exit
 if defined NO_PAUSE goto exit_script

@@ -865,7 +865,7 @@
     setInitialLoadProgress(18, '正在初始化看板');
     if (!data?.meta) {
       setText('#freshness', '数据加载失败');
-      $('#top10Body').innerHTML = '<tr class="empty-row"><td>看板引导数据不存在，请先运行更新看板数据.bat。</td></tr>';
+      $('#top10Body').innerHTML = '<tr class="empty-row"><td>看板引导数据不存在，请先运行数据源目录中的更新T-1数据源.bat。</td></tr>';
       finishInitialLoad(true);
       return;
     }

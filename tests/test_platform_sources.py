@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime
@@ -291,22 +292,22 @@ class PlatformSourceTests(unittest.TestCase):
                 plan.close()
             self.assertEqual(before, {p: p.read_bytes() for p in paths.values()})
 
-    @unittest.skipUnless(os.name == "nt", "Windows BAT integration")
-    def test_root_entry_stops_before_dashboard_on_source_failure(self):
+    def test_unified_entry_stops_before_dashboard_on_source_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            entry = root / "更新看板数据.bat"
-            shutil.copy2(sync.PROJECT_ROOT / entry.name, entry)
+            entry = root / "数据源" / "脚本" / "run_update.py"
+            entry.parent.mkdir(parents=True)
+            shutil.copy2(sync.PROJECT_ROOT / "数据源" / "脚本" / entry.name, entry)
             script = root / "数据源" / "脚本" / "平台管控积分" / "update_platform_sources.py"
             script.parent.mkdir(parents=True)
             shutil.copy2(Path(sync.__file__), script)
             marker = root / "should_not_run.txt"
             (root / "process_data.py").write_text("from pathlib import Path\nPath('should_not_run.txt').write_text('ran')\n", encoding="utf-8")
-            result = subprocess.run(["cmd.exe", "/d", "/c", str(entry), "--no-build", "--no-pause"],
+            result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(entry), "t1", "--no-download", "--no-build"],
                                     cwd=root, capture_output=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(marker.exists())
-            self.assertEqual(result.stderr.decode("utf-8", errors="replace").count("积分管控更新失败"), 1)
+            self.assertEqual(result.stdout.decode("utf-8", errors="replace").count("积分管控更新失败"), 1)
 
 
 if __name__ == "__main__":
