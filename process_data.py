@@ -141,6 +141,30 @@ def jd_delivery_metrics(
     }
 
 
+def estimated_timeout_rate_48h(timeout_36h: Any, rate_36h: Any, timeout_48h: Any) -> float | None:
+    """Estimate 48H rate from unrounded 36H-derived shipment volume."""
+    count = optional_source_number(timeout_36h)
+    rate = optional_source_number(rate_36h)
+    amount = optional_source_number(timeout_48h)
+    if count is None or rate is None or amount is None or count <= 0 or rate <= 0:
+        return None
+    estimated_volume = count / (rate / 100)
+    if not math.isfinite(estimated_volume) or estimated_volume <= 0:
+        return None
+    return round(amount / estimated_volume * 100, 4)
+
+
+def jd_warning_sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    """Stable daily JD warning order, using 36H for all 60 candidates."""
+    return (
+        -number(row.get("timeout_36h")),
+        -number(row.get("timeout_rate_36h")),
+        text(row.get("branch")),
+        text(row.get("customer")),
+        text(row.get("customer_code")),
+    )
+
+
 def customer_is_excluded(customer_name: Any) -> bool:
     name = text(customer_name)
     return any(keyword in name for keyword in EXCLUDED_CUSTOMER_KEYWORDS)
@@ -551,6 +575,11 @@ def read_timeout(timeout_dir: Path, year: int, range_rows: list[dict[str, Any]] 
                 "timeout_96h": integer(row[11]),
                 "timeout_120h": integer(row[12]),
             }
+            if platform != "京东":
+                record["timeout_48h_trend"] = optional_source_number(row[9])
+                record["timeout_rate_48h"] = estimated_timeout_rate_48h(
+                    optional_source_number(row[7]), optional_source_number(row[8]), optional_source_number(row[9])
+                )
             if platform == "京东":
                 record.update(jd_delivery_metrics(
                     record["timeout_36h"],
@@ -1142,6 +1171,9 @@ def build_trends(
         customer_box["customer_code"] = customer_code or customer_box["customer_code"]
         customer_box["has_shipping_fallback"] = shipping_fallback
         point = {k: row[k] for k in ("date", "timeout_24h", "timeout_36h", "timeout_rate_36h", "timeout_48h", "timeout_72h", "timeout_96h", "timeout_120h")}
+        if row["platform"] != "京东":
+            point["timeout_48h"] = row.get("timeout_48h_trend")
+            point["timeout_rate_48h"] = row.get("timeout_rate_48h")
         if row["platform"] == "京东":
             point.update({k: row.get(k) for k in (
                 "shipment_volume",
@@ -1327,7 +1359,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         for day in dates_by_platform[platform]:
             rows_for_day = (r for r in timeout_rows if r["platform"] == platform and r["date"] == day)
             if platform == "京东":
-                daily = sorted(rows_for_day, key=lambda r: (-r["timeout_48h"], -number(r.get("timeout_rate_48h")), -r["timeout_36h"], r["branch"]))[:60]
+                daily = sorted(rows_for_day, key=jd_warning_sort_key)[:60]
             elif platform == "抖音":
                 daily = sorted(rows_for_day, key=lambda r: (-r["timeout_36h"], -r["timeout_rate_36h"], r["branch"]))[:60]
             else:

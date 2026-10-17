@@ -6,11 +6,21 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#f5f5f7">
   <title>交件监控中心</title>
-  <link rel="stylesheet" href="assets/dashboard.css?v=34">
+  <link rel="stylesheet" href="assets/dashboard.css?v=35">
 </head>
 <body>
   <div class="page-load-progress" id="pageLoadProgress" role="progressbar" aria-label="正在准备看板" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
     <span class="page-load-progress-bar" id="pageLoadProgressBar"></span>
+  </div>
+  <div class="platform-rail" id="platformRail">
+    <button class="platform-rail-toggle" id="platformRailToggle" type="button" aria-expanded="false" aria-controls="platformRailMenu" aria-label="展开平台菜单">平台</button>
+    <div class="platform-rail-menu" id="platformRailMenu" hidden aria-label="切换平台">
+      <button class="platform-rail-close" id="platformRailClose" type="button" aria-label="关闭平台菜单">×</button>
+      <button type="button" data-platform="抖音"><span class="platform-icon douyin">音</span>抖音</button>
+      <button type="button" data-platform="淘宝"><span class="platform-icon taobao">淘</span>淘宝</button>
+      <button type="button" data-platform="京东"><span class="platform-icon jd">京</span>京东</button>
+      <button type="button" data-platform="快手"><span class="platform-icon kuaishou">手</span>快手</button>
+    </div>
   </div>
   <div class="ambient ambient-one"></div>
   <div class="ambient ambient-two"></div>
@@ -221,8 +231,8 @@
           </div>
           <div class="jd-threshold-controls" id="jdThresholdControls" hidden>
             <div class="jd-threshold-copy"><strong>上榜阈值</strong><small id="jdThresholdWindow">最近 15 个自然日</small></div>
-            <label><span>48H票数 ≥</span><input id="jdCountThreshold" type="number" min="0" step="1" inputmode="numeric" aria-label="京东48H上榜票数阈值"></label>
-            <label><span>48H率 ≥</span><span class="jd-rate-input"><input id="jdRateThreshold" type="number" min="0" step="0.1" inputmode="decimal" aria-label="京东48H上榜率阈值"><i>%</i></span></label>
+            <label><span>36H票数 ≥</span><input id="jdCountThreshold" type="number" min="0" step="1" inputmode="numeric" aria-label="京东36H上榜票数阈值"></label>
+            <label><span>36H率 ≥</span><span class="jd-rate-input"><input id="jdRateThreshold" type="number" min="0" step="0.1" inputmode="decimal" aria-label="京东36H上榜率阈值"><i>%</i></span></label>
             <label><span>统计天数</span><span class="jd-days-input"><input id="jdWindowDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-label="京东上榜统计自然日天数" value="15"><i>天</i></span></label>
             <button id="resetJdThresholds" type="button">恢复默认</button>
           </div>
@@ -326,7 +336,7 @@
         </div>
         <div class="table-scroll">
           <table class="data-table compact-table jd-control-table">
-            <thead><tr><th>数据日（T-2）</th><th>网点 / 一级公司</th><th>客户名称</th><th>48H超时量</th><th>48H超时率</th><th>7天上榜</th><th>管控开始</th><th>管控结束</th></tr></thead>
+            <thead><tr><th>数据日（T-2）</th><th>网点 / 一级公司</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>7天上榜</th><th>管控开始</th><th>管控结束</th></tr></thead>
             <tbody id="jdControlBody"></tbody>
           </table>
         </div>
@@ -436,6 +446,6 @@
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=19"></script>
   <script src="assets/dashboard-loader.js?v=4"></script>
-  <script src="assets/dashboard.js?v=44"></script>
+  <script src="assets/dashboard.js?v=45"></script>
 </body>
 </html>

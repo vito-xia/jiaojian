@@ -454,17 +454,26 @@
     window.setTimeout(() => { progress.hidden = true; }, 750);
   }
 
+  function closePlatformRailMenu() {
+    const menu = $('#platformRailMenu');
+    const toggle = $('#platformRailToggle');
+    if (!menu || !toggle) return;
+    menu.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-label', '展开平台菜单');
+  }
+
   const PAGE_SIZE = 10;
   const EMPTY_PROVINCE_VALUE = '__empty__';
   const TOP_PAGE_SIZES = Object.freeze([10, 20, 30]);
   const LONG_ORDER_PAGE_SIZES = Object.freeze([10, 20, 50, 100]);
-  const JD_TREND_HOURS = Object.freeze([48, 72, 96]);
+  const JD_TREND_HOURS = Object.freeze([36, 48, 72]);
   const DOUYIN_SCORE_SCENES = Object.freeze({ pickup: '物流停滞-揽收端', full: '物流停滞-全链路' });
   const DOUYIN_AI_MAX_CUSTOMERS = 4;
   const DOUYIN_FULL_LINK_LAG_DAYS = Object.freeze([1, 2, 3]);
   const JD_THRESHOLD_DEFAULTS = Object.freeze({ count: 20, rate: 1, days: 15 });
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
-  const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.v1';
+  const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.36h.v1';
   const state = {
     platform: '抖音', date: '', controlPage: 1, scorePage: 1, extremePage: 1,
     branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端',
@@ -472,7 +481,7 @@
     topPage: 1, topPageSize: 10, longOrderQuery: '', longOrderProvince: '', longOrderPage: 1, longOrderPageSize: 10,
     warningRangeStart: '', warningRangeEnd: '', warningRangeDraftStart: '', warningRangeDraftEnd: '',
     longOrderRangeStart: '', longOrderRangeEnd: '', longOrderRangeDraftStart: '', longOrderRangeDraftEnd: '',
-    jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 48,
+    jdControlPage: 1, jdControlMinHits: JD_CONTROL_RULE.hitCount, jdTrendHours: 36,
     jdThresholdCount: JD_THRESHOLD_DEFAULTS.count, jdThresholdRate: JD_THRESHOLD_DEFAULTS.rate, jdThresholdDays: JD_THRESHOLD_DEFAULTS.days
   };
   let chartJobs = [];
@@ -506,7 +515,7 @@
   function formatOptionalRate(value) { return value === null || value === undefined ? '—' : formatRate(value); }
   function jdTrendMetric(hours = state.jdTrendHours) {
     const numericHours = Number(hours);
-    const normalizedHours = JD_TREND_HOURS.includes(numericHours) ? numericHours : 48;
+    const normalizedHours = JD_TREND_HOURS.includes(numericHours) ? numericHours : 36;
     return {
       hours: normalizedHours,
       countField: 'timeout_' + normalizedHours + 'h',
@@ -527,8 +536,7 @@
     return {
       ...point,
       timeout_rate_48h: jdTimeoutRate(point, 48),
-      timeout_rate_72h: jdTimeoutRate(point, 72),
-      timeout_rate_96h: jdTimeoutRate(point, 96)
+      timeout_rate_72h: jdTimeoutRate(point, 72)
     };
   }
   function shortDate(value) { return value ? String(value).slice(0, 10) : '—'; }
@@ -827,10 +835,10 @@
     if (!customer) return 0;
     return (customer.series || []).filter(point => (
       windowDates.has(point.date)
-      && point.timeout_rate_48h !== null
-      && point.timeout_rate_48h !== undefined
-      && Number(point.timeout_48h || 0) >= state.jdThresholdCount
-      && Number(point.timeout_rate_48h) >= state.jdThresholdRate
+      && point.timeout_rate_36h !== null
+      && point.timeout_rate_36h !== undefined
+      && Number(point.timeout_36h || 0) >= state.jdThresholdCount
+      && Number(point.timeout_rate_36h) >= state.jdThresholdRate
     )).length;
   }
 
@@ -937,6 +945,39 @@
     }
   }
   function bindEvents() {
+    const rail = $('#platformRail');
+    const railToggle = $('#platformRailToggle');
+    const railMenu = $('#platformRailMenu');
+    $$('#platformRailMenu [data-platform]').forEach(item => {
+      const active = item.dataset.platform === state.platform;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-pressed', String(active));
+    });
+    const setPlatformRailOpen = open => {
+      railMenu.hidden = !open;
+      railToggle.setAttribute('aria-expanded', String(open));
+      railToggle.setAttribute('aria-label', open ? '收起平台菜单' : '展开平台菜单');
+      if (open) $('#platformRailMenu button[data-platform].active')?.focus();
+      else railToggle.focus();
+    };
+    railToggle.addEventListener('click', () => setPlatformRailOpen(railMenu.hidden));
+    $('#platformRailClose').addEventListener('click', () => setPlatformRailOpen(false));
+    railMenu.addEventListener('click', event => {
+      const button = event.target.closest('[data-platform]');
+      if (!button) return;
+      setPlatformRailOpen(false);
+      const topButton = $(`#platformSwitcher [data-platform="${CSS.escape(button.dataset.platform)}"]`);
+      topButton?.click();
+    });
+    document.addEventListener('click', event => {
+      if (!railMenu.hidden && !rail.contains(event.target)) setPlatformRailOpen(false);
+    });
+    rail.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !railMenu.hidden) {
+        event.stopPropagation();
+        setPlatformRailOpen(false);
+      }
+    });
     $('#platformSwitcher').addEventListener('click', async event => {
       const button = event.target.closest('[data-platform]');
       if (!button || button.dataset.platform === state.platform) return;
@@ -951,6 +992,11 @@
         const active = item === button;
         item.classList.toggle('active', active);
         item.setAttribute('aria-selected', String(active));
+      });
+      $$('#platformRailMenu [data-platform]').forEach(item => {
+        const active = item.dataset.platform === state.platform;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-pressed', String(active));
       });
       state.date = '';
       resetModuleRanges('');
@@ -1240,6 +1286,10 @@
     $('#drawerBackdrop').addEventListener('click', closeDrawer);
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
+        if (!railMenu.hidden) {
+          setPlatformRailOpen(false);
+          return;
+        }
         closeDrawer();
       }
     });
@@ -1361,10 +1411,10 @@
       return;
     }
     const jd = state.platform === '京东';
-    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
+    const timeoutField = 'timeout_36h';
     const total = rows.reduce((sum, row) => sum + Number(row[timeoutField] || 0), 0);
     const branches = new Set(rows.map(row => row.branch)).size;
-    setText('.kpi-primary > p', `TOP10 · ${jd ? '48H' : '36H'}超时量`);
+    setText('.kpi-primary > p', 'TOP10 · 36H超时量');
     setText('#kpiTimeout', formatNumber(total));
     setText('#kpiBranches', `${branches}`);
     setText('#kpiTimeoutNote', `${state.date || '—'} · ${currentDataLabel()} 客户合计`);
@@ -1406,7 +1456,7 @@
     if (!normalized) return { total: 0, rows: [] };
     const searchDate = state.platform === '抖音' ? state.warningRangeEnd || state.date : state.date;
     const range = new Set(dayRange(searchDate, 15));
-    const timeoutField = state.platform === '京东' ? 'timeout_48h' : 'timeout_36h';
+    const timeoutField = 'timeout_36h';
     const rows = branchSearchSourceEntries(query).filter(([, branchData]) => provinceMatches(branchData, state.branchProvince)).map(([branch, branchData]) => {
       const activeCustomers = (branchData.customers || []).map(customer => {
         const points = (customer.series || []).filter(point => range.has(point.date));
@@ -1487,7 +1537,7 @@
     results.innerHTML = `<div class="branch-search-results-head"><div><span>SEARCH RESULTS</span><strong>${escapeHtml(query)}</strong></div><p>${matches.total > matches.rows.length ? `共 ${matches.total} 个匹配，优先展示窗口超时量最高的 ${matches.rows.length} 个` : `共 ${matches.total} 个匹配网点`}</p></div>
       <div class="branch-search-results-grid">${matches.rows.map(row => `<button class="branch-search-result js-branch" type="button" data-branch="${encodeName(row.branch)}" data-context-date="${escapeHtml(searchDate)}">
         <span class="branch-search-name"><strong title="${escapeHtml(row.branch)}">${escapeHtml(row.branch)}</strong><small title="${escapeHtml(row.parent)}">一级公司 · ${escapeHtml(row.parent)}</small></span>
-        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>${searchDayLabel} ${state.platform === '京东' ? '48H' : '36H'}</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>${trendWindowLabel()} ${state.platform === '京东' ? '48H' : '36H'}</small></span><span><b>${formatNumber(row.customerCount)}</b><small>窗口客户</small></span></span>
+        <span class="branch-search-metrics"><span><b>${formatNumber(row.latestTotal)}</b><small>${searchDayLabel} 36H</small></span><span><b>${formatNumber(row.weekTotal)}</b><small>${trendWindowLabel()} 36H</small></span><span><b>${formatNumber(row.customerCount)}</b><small>窗口客户</small></span></span>
         <span class="branch-search-open">${row.lastActiveDate ? `最近数据 ${shortDate(row.lastActiveDate)}` : '最近15天暂无数据'}<i>查看趋势</i></span>
       </button>`).join('')}</div>`;
   }
@@ -1559,7 +1609,7 @@
     $('#top10Head').innerHTML = douyin
       ? '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>停滞积分</th><th>当前平台管控</th><th>管控店铺数</th><th>历史清退次数</th><th>最近清退时间</th><th>最近清退类型</th><th>历史缺货情况</th></tr>'
       : jd
-        ? '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>48H量</th><th>48H率</th><th>72H量</th><th>72H率</th><th>96H量</th><th>96H率</th><th>上榜次数</th><th>发运兜底</th></tr>'
+        ? '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>发货量</th><th>发货区间</th><th>36H量</th><th>36H率</th><th>48H量</th><th>48H率</th><th>72H量</th><th>72H率</th><th>上榜次数</th><th>发运兜底</th></tr>'
         : '<tr><th>排名</th><th>省区</th><th>网点名称</th><th>客户名称</th><th>36H超时量</th><th>36H超时率</th><th>24H超时量</th><th>48H超时量</th><th>发运兜底</th><th>历史缺货情况</th></tr>';
     if (rangeActive) $('#top10Head th:nth-child(6)').textContent = '36H超时率（估算）';
 
@@ -1576,7 +1626,7 @@
         const customer = `<div class="customer-cell"><span class="customer-name" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span><span class="inline-tags"><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">发运兜底 · ${escapeHtml(row.has_shipping_fallback || '未配置')}</span></span></div>`;
         const identity = `<td>${rankBadge(row.rank)}</td><td class="province-cell">${provinceCell(row.province)}</td><td>${branchButton(row.branch, row.parent_name, 'pickup', false, douyin ? rangeEnd : '')}</td><td>${customer}</td>`;
         if (jd) {
-          return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 48))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_72h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 72))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_96h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 96))}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
+          return `<tr>${identity}<td><span class="metric-number compact">${formatOptionalNumber(row.shipment_volume)}</span></td><td><span class="shipment-band">${escapeHtml(row.shipment_interval || '无法计算')}</span></td><td><span class="metric-number">${formatNumber(row.timeout_36h)}</span></td><td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td><td><span class="metric-number">${formatNumber(row.timeout_48h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 48))}</span></td><td><span class="metric-number">${formatNumber(row.timeout_72h)}</span></td><td><span class="rate">${formatOptionalRate(jdTimeoutRate(row, 72))}</span></td><td>${rankingCountChip(jdRankingCount(row))}</td><td><span class="micro-tag ${row.has_shipping_fallback === '是' ? 'yes' : ''}">${escapeHtml(row.has_shipping_fallback || '—')}</span></td></tr>`;
         }
         const coverageTitle = rangeActive ? `已收录该客户 ${row.range_recorded_days} 个数据日；未收录日期不补零` : '';
         const common = `${identity}<td title="${escapeHtml(coverageTitle)}"><span class="metric-number">${rangeActive ? formatOptionalNumber(row.timeout_36h) : formatNumber(row.timeout_36h)}</span></td><td><span class="rate">${rangeActive ? formatOptionalRate(row.timeout_rate_36h) : formatRate(row.timeout_rate_36h)}</span></td>`;
@@ -1594,18 +1644,18 @@
     }
 
     const warningCoverage = sourceCoverage(warningRangeDataReady() ? data.warning_range.dates : sourceDates, rangeStart, rangeEnd);
-    setText('#warningStatus', warningRangeLoading ? '正在加载区间明细' : warningRangeLoadError ? '区间明细加载失败' : rangeActive ? `区间累计 · ${warningCoverage.covered}个数据日` : douyin ? '聚焦最高风险客户' : jd ? '聚焦 48H 最高风险' : '内部交件预警');
+    setText('#warningStatus', warningRangeLoading ? '正在加载区间明细' : warningRangeLoadError ? '区间明细加载失败' : rangeActive ? `区间累计 · ${warningCoverage.covered}个数据日` : douyin ? '聚焦最高风险客户' : jd ? '聚焦 36H 最高风险' : '内部交件预警');
     setText('#top10Caption', douyin
       ? rangeActive
         ? `已收录数据累计 · 覆盖 ${warningCoverage.covered}/${warningCoverage.total} 个自然日 · TOP60 · 日指标截至 ${rangeEnd}`
         : `${rangeEnd || '—'} TOP60 · 按 36H 交件超时量降序 · 平台风险字段已联动`
-      : jd ? `按 ${currentDataLabel()} 48H 交件超时量降序 · 上榜阈值 ≥${formatNumber(state.jdThresholdCount)}票且 ≥${formatNumber(state.jdThresholdRate)}%` : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
+      : jd ? `按 ${currentDataLabel()} 36H 交件超时量降序 · 上榜阈值 ≥${formatNumber(state.jdThresholdCount)}票且 ≥${formatNumber(state.jdThresholdRate)}%` : `按 ${currentDataLabel()} 36H 交件超时量降序 · 仅内部预警数据`);
     $('#top10Footnote').textContent = douyin
       ? rangeActive
         ? '36H超时量为已收录数据逐日累计，未收录客户日期不补零；36H超时率以“超时量 ÷ (超时率/100)”反推发货量后加权估算，空值、0%无法反推或分母为0时显示“—”。停滞积分取结束日，管控、清退和发运兜底沿用现有最新快照。已排除指定客户。'
         : '36H 超时率沿用源表数值（源表已省略 %）；历史清退次数按一级公司汇总，分部自身次数在其下方辅助展示。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。'
       : jd
-        ? `发货量仍由 36H超时量 ÷ (36H超时率 / 100) 反推并四舍五入取整；48H/72H/96H超时率 = 对应超时量 ÷ 发货量。上榜次数按所选数据日向前共 ${state.jdThresholdDays} 个自然日统计，48H票数与48H率两个阈值需同时命中；分母为 0 时显示“—”。`
+        ? `发货量由 36H超时量 ÷ (36H超时率 / 100) 反推并四舍五入取整；36H/48H/72H超时率沿用各时效量 ÷ 发货量。上榜次数按所选数据日向前共 ${state.jdThresholdDays} 个自然日统计，36H票数与36H率两个阈值需同时命中；分母为 0 时显示“—”。`
         : `${state.platform}当前只统计内部交件预警；停滞积分、平台管控与清退字段不参与本平台视图。已排除客户名称包含“温宿韵通达”“新疆”“北亩”的记录。`;
   }
 
@@ -1614,9 +1664,9 @@
     return dates.filter(day => day >= JD_CONTROL_RULE.startDate).sort();
   }
   function isJdControlHit(point) {
-    if (!point || point.timeout_rate_48h === null || point.timeout_rate_48h === undefined) return false;
-    return Number(point.timeout_48h || 0) >= state.jdThresholdCount
-      && Number(point.timeout_rate_48h) >= state.jdThresholdRate;
+    if (!point || point.timeout_rate_36h === null || point.timeout_rate_36h === undefined) return false;
+    return Number(point.timeout_36h || 0) >= state.jdThresholdCount
+      && Number(point.timeout_rate_36h) >= state.jdThresholdRate;
   }
   function jdControlRows() {
     const sourceDates = jdControlSourceDates();
@@ -1639,8 +1689,8 @@
             parent_name: parent,
             customer: customer.customer || '未命名客户',
             customer_code: customer.customer_code || '',
-            timeout_48h: Number(point.timeout_48h || 0),
-            timeout_rate_48h: Number(point.timeout_rate_48h),
+            timeout_36h: Number(point.timeout_36h || 0),
+            timeout_rate_36h: Number(point.timeout_rate_36h),
             listing_count: listingCount,
             control_start: shiftDate(dataDate, 1),
             control_end: shiftDate(dataDate, 7)
@@ -1649,7 +1699,7 @@
       });
     });
     return rows.sort((a, b) => b.data_date.localeCompare(a.data_date)
-      || b.timeout_48h - a.timeout_48h
+      || b.timeout_36h - a.timeout_36h
       || a.branch.localeCompare(b.branch, 'zh-CN')
       || a.customer.localeCompare(b.customer, 'zh-CN')).slice(0, JD_CONTROL_RULE.maxRows);
   }
@@ -1679,14 +1729,14 @@
     state.jdControlPage = Math.min(state.jdControlPage, pages);
     const pageRows = rows.slice((state.jdControlPage - 1) * PAGE_SIZE, state.jdControlPage * PAGE_SIZE);
     setText('#jdControlCount', `${rows.length} 条`);
-    setText('#jdControlRuleText', `48H票数 ≥ ${formatNumber(state.jdThresholdCount)} · 48H率 ≥ ${formatNumber(state.jdThresholdRate)}% · ${JD_CONTROL_RULE.windowDays}天累计上榜 ≥ ${state.jdControlMinHits}次`);
+    setText('#jdControlRuleText', `36H票数 ≥ ${formatNumber(state.jdThresholdCount)} · 36H率 ≥ ${formatNumber(state.jdThresholdRate)}% · ${JD_CONTROL_RULE.windowDays}天累计上榜 ≥ ${state.jdControlMinHits}次`);
     setText('#jdControlStatus', rows.length ? `已生成 ${rows.length} 条 · 历史计算至 ${shortDate(controlLatest)}` : `暂无命中 · 历史计算至 ${shortDate(controlLatest)}`);
     $('#jdControlBody').innerHTML = pageRows.length ? pageRows.map(row => `<tr>
       <td>${shortDate(row.data_date)}<span class="subline">T-2数据</span></td>
       <td>${branchButton(row.branch, row.parent_name)}</td>
       <td><span class="jd-control-customer" title="${escapeHtml(row.customer)}">${escapeHtml(row.customer)}</span>${row.customer_code ? `<span class="subline">客户编码 ${escapeHtml(row.customer_code)}</span>` : ''}</td>
-      <td>${formatNumber(row.timeout_48h)}</td>
-      <td><span class="rate">${formatRate(row.timeout_rate_48h)}</span></td>
+      <td>${formatNumber(row.timeout_36h)}</td>
+      <td><span class="rate">${formatRate(row.timeout_rate_36h)}</span></td>
       <td><span class="jd-control-hit">${row.listing_count}/${JD_CONTROL_RULE.windowDays}次</span></td>
       <td>${shortDate(row.control_start)}</td>
       <td>${shortDate(row.control_end)}</td>
@@ -2397,14 +2447,14 @@
         point: customer.series.find(point => point.date === date && point.hasSourcePoint)
       })).filter(entry => entry.point);
       const shipmentVolume = entries.reduce((sum, entry) => sum + Number(entry.point.shipment_volume || 0), 0);
-      const timeout48h = entries.reduce((sum, entry) => sum + Number(entry.point.timeout_48h || 0), 0);
+      const timeout36h = entries.reduce((sum, entry) => sum + Number(entry.point.timeout_36h || 0), 0);
       return {
         date,
         entries,
         customerCount: entries.length,
         shipmentVolume,
-        timeout48h,
-        timeoutRate48h: shipmentVolume ? timeout48h / shipmentVolume * 100 : null
+        timeout36h,
+        timeoutRate36h: shipmentVolume ? timeout36h / shipmentVolume * 100 : null
       };
     });
     const activeDays = daily.filter(day => day.customerCount);
@@ -2416,32 +2466,32 @@
       return;
     }
 
-    const delta = previous ? latest.timeout48h - previous.timeout48h : null;
+    const delta = previous ? latest.timeout36h - previous.timeout36h : null;
     const tone = delta === null || delta === 0 ? 'neutral' : delta < 0 ? 'good' : 'risk';
     const statusCopy = delta === null ? '首个数据日' : delta < 0 ? '较前期改善' : delta > 0 ? '较前期上升' : '较前期持平';
-    const ranked = [...latest.entries].sort((a, b) => Number(b.point.timeout_48h || 0) - Number(a.point.timeout_48h || 0));
+    const ranked = [...latest.entries].sort((a, b) => Number(b.point.timeout_36h || 0) - Number(a.point.timeout_36h || 0));
     const topEntry = ranked[0];
-    const topAmount = Number(topEntry?.point.timeout_48h || 0);
-    const topShare = latest.timeout48h ? topAmount / latest.timeout48h * 100 : 0;
-    const highestRateEntry = [...latest.entries].filter(entry => entry.point.timeout_rate_48h !== null && entry.point.timeout_rate_48h !== undefined)
-      .sort((a, b) => Number(b.point.timeout_rate_48h || 0) - Number(a.point.timeout_rate_48h || 0))[0];
+    const topAmount = Number(topEntry?.point.timeout_36h || 0);
+    const topShare = latest.timeout36h ? topAmount / latest.timeout36h * 100 : 0;
+    const highestRateEntry = [...latest.entries].filter(entry => entry.point.timeout_rate_36h !== null && entry.point.timeout_rate_36h !== undefined)
+      .sort((a, b) => Number(b.point.timeout_rate_36h || 0) - Number(a.point.timeout_rate_36h || 0))[0];
     const cards = [
-      ['最新48H超时量', formatNumber(latest.timeout48h), latest.date],
+      ['最新36H超时量', formatNumber(latest.timeout36h), latest.date],
       ['最新发货量', formatNumber(latest.shipmentVolume), '全部客户估算合计'],
-      ['最新48H超时率', formatOptionalRate(latest.timeoutRate48h), '按合计发货量计算'],
+      ['最新36H超时率', formatOptionalRate(latest.timeoutRate36h), '按合计发货量计算'],
       ['涉及客户', `${latest.customerCount}个`, '最近数据日有记录']
     ];
     const insights = [
-      `${latest.date} 全部 ${latest.customerCount} 个客户的 48H 超时量为 ${formatNumber(latest.timeout48h)} 单，估算发货量 ${formatNumber(latest.shipmentVolume)}，综合 48H 超时率 ${formatOptionalRate(latest.timeoutRate48h)}。`,
+      `${latest.date} 全部 ${latest.customerCount} 个客户的 36H 超时量为 ${formatNumber(latest.timeout36h)} 单，估算发货量 ${formatNumber(latest.shipmentVolume)}，综合 36H 超时率 ${formatOptionalRate(latest.timeoutRate36h)}。`,
       previous
-        ? `较上一有效数据日 ${previous.date}，48H 超时量${delta < 0 ? '减少' : delta > 0 ? '增加' : '持平'}${delta === 0 ? '' : ` ${formatNumber(Math.abs(delta))} 单`}。`
+        ? `较上一有效数据日 ${previous.date}，36H 超时量${delta < 0 ? '减少' : delta > 0 ? '增加' : '持平'}${delta === 0 ? '' : ` ${formatNumber(Math.abs(delta))} 单`}。`
         : '当前仅有一个有效数据日，暂不做环比判断。',
       topEntry
-        ? `48H 超时量最高的客户是“${topEntry.customer.customer || '未命名客户'}”，共 ${formatNumber(topAmount)} 单，占该网点当日 48H 超时量的 ${topShare.toFixed(1)}%。`
-        : '最近数据日暂无客户产生 48H 超时。',
+        ? `36H 超时量最高的客户是“${topEntry.customer.customer || '未命名客户'}”，共 ${formatNumber(topAmount)} 单，占该网点当日 36H 超时量的 ${topShare.toFixed(1)}%。`
+        : '最近数据日暂无客户产生 36H 超时。',
       highestRateEntry
-        ? `48H 超时率最高的客户是“${highestRateEntry.customer.customer || '未命名客户'}”，为 ${formatOptionalRate(highestRateEntry.point.timeout_rate_48h)}。`
-        : '最近数据日缺少可计算的 48H 超时率。'
+        ? `36H 超时率最高的客户是“${highestRateEntry.customer.customer || '未命名客户'}”，为 ${formatOptionalRate(highestRateEntry.point.timeout_rate_36h)}。`
+        : '最近数据日缺少可计算的 36H 超时率。'
     ];
 
     panel.innerHTML = `<div class="jd-analysis-head"><div><span>RECENT INSIGHT</span><h3>全部客户近期分析</h3><p>${escapeHtml(branch)} · 最近有效数据 ${escapeHtml(latest.date)}</p></div><span class="jd-analysis-status ${tone}">${escapeHtml(statusCopy)}</span></div>
@@ -2484,18 +2534,18 @@
       return point.hasSourcePoint && pointIndex >= fromIndex && pointIndex <= toIndex;
     }));
     const shipmentVolume = selectedPoints.reduce((sum, point) => sum + Number(point.shipment_volume || 0), 0);
+    const timeout36h = selectedPoints.reduce((sum, point) => sum + Number(point.timeout_36h || 0), 0);
     const timeout48h = selectedPoints.reduce((sum, point) => sum + Number(point.timeout_48h || 0), 0);
     const timeout72h = selectedPoints.reduce((sum, point) => sum + Number(point.timeout_72h || 0), 0);
-    const timeout96h = selectedPoints.reduce((sum, point) => sum + Number(point.timeout_96h || 0), 0);
     const rate = amount => shipmentVolume ? amount / shipmentVolume * 100 : null;
     const cards = [
       ['发货量', formatNumber(shipmentVolume), '所选客户与周期合计'],
+      ['36H超时量', formatNumber(timeout36h), '所选周期合计'],
+      ['36H超时率', formatOptionalRate(rate(timeout36h)), '超时量 ÷ 发货量'],
       ['48H超时量', formatNumber(timeout48h), '所选周期合计'],
       ['48H超时率', formatOptionalRate(rate(timeout48h)), '超时量 ÷ 发货量'],
       ['72H超时量', formatNumber(timeout72h), '所选周期合计'],
-      ['72H超时率', formatOptionalRate(rate(timeout72h)), '超时量 ÷ 发货量'],
-      ['96H超时量', formatNumber(timeout96h), '所选周期合计'],
-      ['96H超时率', formatOptionalRate(rate(timeout96h)), '超时量 ÷ 发货量']
+      ['72H超时率', formatOptionalRate(rate(timeout72h)), '超时量 ÷ 发货量']
     ];
     const customerOptions = ['<option value="__all__"' + (customerValue === '__all__' ? ' selected' : '') + '>全部客户</option>']
       .concat(customers.map((customer, index) => `<option value="${index}"${String(index) === customerValue ? ' selected' : ''}>${escapeHtml(customer.customer || '未命名客户')}</option>`)).join('');
@@ -2513,28 +2563,29 @@
       panel.innerHTML = `<div class="drawer-empty">该分部在${trendWindowLabel()}内没有客户数据。</div>`;
       return;
     }
-    const metric = jd ? jdTrendMetric() : { hours: 36, countField: 'timeout_36h', rateField: 'timeout_rate_36h' };
+    const metric = jdTrendMetric();
     const metricLabel = metric.hours + 'H';
     const headingMeta = `${trendWindowLabel()} · ${range[0]} — ${range.at(-1)} · 缺失日期按 0 展示`;
-    const selector = jd
-      ? '<label class="jd-trend-filter" for="jdTrendMetric"><span>趋势口径</span><select id="jdTrendMetric" aria-label="京东客户交件量率趋势口径">'
-        + JD_TREND_HOURS.map(hours => '<option value="' + hours + '"' + (hours === metric.hours ? ' selected' : '') + '>' + hours + 'H量率</option>').join('')
-        + '</select></label>'
-      : '';
-    const heading = jd
-      ? `<div class="charts-heading jd-charts-heading"><div><h3>全部客户趋势</h3><span>${headingMeta}</span></div>${selector}</div>`
-      : `<div class="charts-heading"><h3>全部客户趋势</h3><span>${headingMeta}</span></div>`;
+    const availableHours = jd ? JD_TREND_HOURS : [36, 48];
+    const selector = '<label class="jd-trend-filter" for="customerTrendMetric"><span>趋势口径</span><select id="customerTrendMetric" aria-label="客户交件量率趋势口径">'
+      + availableHours.map(hours => '<option value="' + hours + '"' + (hours === metric.hours ? ' selected' : '') + '>' + hours + 'H量率</option>').join('')
+      + '</select></label>';
+    const heading = `<div class="charts-heading jd-charts-heading"><div><h3>全部客户趋势</h3><span>${headingMeta}</span></div>${selector}</div>`;
     panel.innerHTML = heading + customers.map((customer, index) => {
       const displayName = customerDisplayName(customer);
       const latest = customer.series.at(-1);
-      const total = customer.series.reduce((sum, point) => sum + Number(point[metric.countField] || 0), 0);
+      const metricAmounts = customer.series
+        .filter(point => point.hasSourcePoint !== false)
+        .map(point => optionalFiniteNumber(point[metric.countField]))
+        .filter(value => value !== null);
+      const total = metricAmounts.length ? metricAmounts.reduce((sum, value) => sum + value, 0) : null;
       const latestRate = jd ? jdTimeoutRate(latest, metric.hours) : latest?.[metric.rateField];
       const detail = jd
         ? `发货量 · ${formatOptionalNumber(latest?.shipment_volume)} · ${escapeHtml(latest?.shipment_interval || '无法计算')} · ${currentDataLabel()} ${metricLabel}超时率 ${formatOptionalRate(latestRate)}`
-        : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}超时率 ${formatRate(latestRate)}`;
-      return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatNumber(total)}</strong><span>${trendWindowLabel()} ${metricLabel}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${metricLabel}超时量</span><span><i class="line"></i>${metricLabel}超时率</span></div></article>`;
+        : `发运兜底 · ${escapeHtml(customer.has_shipping_fallback || '未配置')} · ${currentDataLabel()}${metricLabel}超时率${metric.hours === 48 ? '（估算）' : ''} ${formatOptionalRate(latestRate)}`;
+      return `<article class="chart-card"><div class="chart-card-head"><div><h4 title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</h4><p>${detail}</p></div><div class="chart-stat"><strong>${formatOptionalNumber(total)}</strong><span>${trendWindowLabel()} ${metricLabel}超时量</span></div></div><canvas class="combo-chart" id="chart-${index}"></canvas><div class="chart-legend"><span><i></i>${metricLabel}超时量</span><span><i class="line"></i>${metricLabel}超时率${!jd && metric.hours === 48 ? '（估算）' : ''}</span></div></article>`;
     }).join('');
-    $('#jdTrendMetric')?.addEventListener('change', event => {
+    $('#customerTrendMetric')?.addEventListener('change', event => {
       state.jdTrendHours = jdTrendMetric(event.target.value).hours;
       renderCustomerTrendCharts(customers, range, jd);
     });
@@ -2603,6 +2654,7 @@
     chartJobs = [];
     renderDeliveryScoreTrend(branch, range);
     const layer = $('#drawerLayer');
+    closePlatformRailMenu();
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -2621,6 +2673,7 @@
     clearJdCustomerPeriodAnalysis();
     chartJobs = [];
     const layer = $('#drawerLayer');
+    closePlatformRailMenu();
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -2659,6 +2712,7 @@
     const dimension = item.row_dimension === 'customer' ? '客户' : '网点记录';
     panel.innerHTML = `<div class="charts-heading"><div><h3>T 日${dimension}趋势入口</h3><span>${rows.length ? '点击 24H / 36H 数值打开待发运与始发退回时长趋势。' : '当前 T 日暂无该网点记录。'}</span></div></div>${rows.map(row => `<article class="tday-branch-row"><div><strong title="${escapeHtml(row.customer || row.branch)}">${escapeHtml(row.customer || row.branch || '未命名网点')}</strong><small>${row.customer_code ? `客户编码 ${escapeHtml(row.customer_code)}` : row.customer ? '客户编码未提供' : '内网轨迹网点汇总'}</small></div><div class="tday-branch-metrics">${tdayMetricButton(row, 24)}${tdayMetricButton(row, 36)}</div></article>`).join('')}`;
     const layer = $('#drawerLayer');
+    closePlatformRailMenu();
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -2852,6 +2906,7 @@
       requestAnimationFrame(draw);
     }
     const layer = $('#drawerLayer');
+    closePlatformRailMenu();
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -2903,8 +2958,8 @@
     if (!requestIsCurrent()) return;
     const jd = state.platform === '京东';
     const drawerDate = contextDate || state.date;
-    if (jd) state.jdTrendHours = 48;
-    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
+    state.jdTrendHours = 36;
+    const timeoutField = 'timeout_36h';
     const branchData = data.trends?.[state.platform]?.[branch];
     const parent = branchData?.parent_name || branchRisk(branch, drawerDate).parent_name || branch;
     const range = dayRange(drawerDate, 15);
@@ -2914,7 +2969,7 @@
         const sourcePoint = byDate.get(day);
         return sourcePoint
           ? { ...(jd ? withJdTimeoutRates(sourcePoint) : sourcePoint), hasSourcePoint: true }
-          : { date: day, timeout_36h: 0, timeout_rate_36h: 0, timeout_48h: 0, timeout_rate_48h: null, timeout_72h: 0, timeout_rate_72h: null, timeout_96h: 0, timeout_rate_96h: null, shipment_volume: null, shipment_interval: '无法计算', hasSourcePoint: false };
+          : { date: day, timeout_36h: 0, timeout_rate_36h: null, timeout_48h: jd ? 0 : null, timeout_rate_48h: null, timeout_72h: 0, timeout_rate_72h: null, timeout_96h: 0, timeout_rate_96h: null, shipment_volume: null, shipment_interval: '无法计算', hasSourcePoint: false };
       });
       const hasSourcePoint = series.some(point => point.hasSourcePoint);
       const total = series.reduce((sum, point) => sum + Number(point[timeoutField] || 0), 0);
@@ -2925,14 +2980,14 @@
     const branchTop5Rows = branchTop5Supported ? (data.branch_top5_data?.[state.platform]?.[branch] || []) : [];
     const latestTotal = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.[timeoutField] || 0), 0);
     const latestShipmentVolume = customers.reduce((sum, customer) => sum + Number(customer.series.at(-1)?.shipment_volume || 0), 0);
-    const latestRate48h = latestShipmentVolume ? latestTotal / latestShipmentVolume * 100 : null;
+    const latestRate36h = latestShipmentVolume ? latestTotal / latestShipmentVolume * 100 : null;
     const weekTotal = customers.reduce((sum, customer) => sum + customer.total, 0);
     const summaryItems = jd
       ? [
         ['窗口客户', `${customers.length}个`],
-        ['15天48H超时', formatNumber(weekTotal)],
-        [`${currentDataLabel()} 48H超时`, formatNumber(latestTotal)],
-        [`${currentDataLabel()} 48H超时率`, formatOptionalRate(latestRate48h)]
+        ['15天36H超时', formatNumber(weekTotal)],
+        [`${currentDataLabel()} 36H超时`, formatNumber(latestTotal)],
+        [`${currentDataLabel()} 36H超时率`, formatOptionalRate(latestRate36h)]
       ]
       : [
         ['窗口客户', `${customers.length}个`],
@@ -2979,6 +3034,7 @@
     }
     renderCustomerTrendCharts(customers, range, jd);
     const layer = $('#drawerLayer');
+    closePlatformRailMenu();
     layer.classList.add('open');
     layer.setAttribute('aria-hidden', 'false');
     document.body.style.overflow = 'hidden';
@@ -3024,7 +3080,8 @@
     const height = cssHeight - pad.top - pad.bottom;
     const barMaxRaw = Math.max(1, ...series.map(point => Number(point[countField] || 0)));
     const barMax = Math.ceil(barMaxRaw / 5) * 5 || 5;
-    const rateMaxRaw = Math.max(1, ...series.map(point => Number(point[rateField] || 0)));
+    const validRates = series.map(point => optionalFiniteNumber(point[rateField])).filter(value => value !== null);
+    const rateMaxRaw = Math.max(1, ...validRates);
     const rateMax = Math.max(5, Math.ceil(rateMaxRaw / 5) * 5);
     context.font = '9px -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif';
     context.textBaseline = 'middle';
@@ -3048,9 +3105,9 @@
     const points = [];
     series.forEach((point, index) => {
       const center = pad.left + slot * index + slot / 2;
-      const value = Number(point[countField] || 0);
-      const barHeight = value / barMax * height;
-      if (barHeight > 0) {
+      const value = optionalFiniteNumber(point[countField]);
+      const barHeight = value === null ? 0 : value / barMax * height;
+      if (value !== null && barHeight > 0) {
         const gradient = context.createLinearGradient(0, pad.top + height - barHeight, 0, pad.top + height);
         gradient.addColorStop(0, '#45a6ff'); gradient.addColorStop(1, '#0071e3');
         context.fillStyle = gradient;
@@ -3058,32 +3115,44 @@
         context.fill();
         context.fillStyle = '#424245';
         context.textAlign = 'center';
+      }
+      if (value !== null) {
+        context.fillStyle = '#424245';
+        context.textAlign = 'center';
         context.fillText(formatNumber(value), center, Math.max(9, pad.top + height - barHeight - 8));
       }
-      const rate = Number(point[rateField] || 0);
-      points.push({ x: center, y: pad.top + height - rate / rateMax * height, rate });
+      const rate = optionalFiniteNumber(point[rateField]);
+      points.push(rate === null ? null : { x: center, y: pad.top + height - rate / rateMax * height, rate });
       context.fillStyle = '#86868b';
       context.textAlign = 'center';
       const [, month, day] = point.date.split('-');
       context.fillText(`${Number(month)}/${Number(day)}`, center, pad.top + height + 18);
     });
 
-    if (points.length) {
+    if (points.some(Boolean)) {
       context.strokeStyle = '#ff9500';
       context.lineWidth = 2.2;
       context.lineJoin = 'round';
       context.lineCap = 'round';
-      context.beginPath();
-      points.forEach((point, index) => {
-        if (!index) context.moveTo(point.x, point.y);
-        else {
-          const previous = points[index - 1];
+      let segment = [];
+      const drawSegment = () => {
+        if (!segment.length) return;
+        context.beginPath();
+        context.moveTo(segment[0].x, segment[0].y);
+        segment.slice(1).forEach((point, index) => {
+          const previous = segment[index];
           const middle = (previous.x + point.x) / 2;
           context.bezierCurveTo(middle, previous.y, middle, point.y, point.x, point.y);
-        }
-      });
-      context.stroke();
+        });
+        context.stroke();
+        segment = [];
+      };
       points.forEach(point => {
+        if (point) segment.push(point);
+        else drawSegment();
+      });
+      drawSegment();
+      points.filter(Boolean).forEach(point => {
         context.fillStyle = '#fff'; context.strokeStyle = '#ff9500'; context.lineWidth = 2;
         context.beginPath(); context.arc(point.x, point.y, 3.6, 0, Math.PI * 2); context.fill(); context.stroke();
       });
@@ -3296,11 +3365,11 @@
     if (isTdayActive()) return;
     const rows = top10Rows();
     const jd = state.platform === '京东';
-    const timeoutField = jd ? 'timeout_48h' : 'timeout_36h';
-    const rateField = jd ? 'timeout_rate_48h' : 'timeout_rate_36h';
-    const metricHours = jd ? '48H' : '36H';
+    const timeoutField = 'timeout_36h';
+    const rateField = 'timeout_rate_36h';
+    const metricHours = '36H';
     setText('#analysisTitle', `${state.platform} · ${state.date || '—'} 当日分析`);
-    setText('#analysisSubtitle', `${currentDataLabel()} 数据口径 · 仅分析页面所示 TOP10 客户，${jd ? '京东采用 48H 口径，' : ''}切换平台或日期后自动更新。`);
+    setText('#analysisSubtitle', `${currentDataLabel()} 数据口径 · 仅分析页面所示 TOP10 客户，切换平台或日期后自动更新。`);
     const status = $('#analysisStatus');
     const content = $('#analysisContent');
     if (!rows.length) {
@@ -3351,7 +3420,7 @@
     if (state.platform === '抖音') {
       insights.push(`联动风险：滚动 16 天达到 6 分及以上的网点 ${currentScores().length} 个，近 7 天平台管控动作 ${currentControls().length} 条。`);
     } else if (jd) {
-      insights.push('京东当前按 48H 内部交件预警分析；发货量由 36H 超时量与 36H 超时率反推，停滞积分和抖音平台管控不参与结论。');
+      insights.push('京东按 36H 内部交件预警分析；发货量由 36H 超时量与 36H 超时率反推，停滞积分和抖音平台管控不参与结论。');
     } else {
       insights.push(`${state.platform}当前仅按内部交件预警分析，停滞积分和抖音平台管控不参与该平台结论。`);
     }
