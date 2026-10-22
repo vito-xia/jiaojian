@@ -1413,7 +1413,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         high = []
         for branch in daily_scores:
             score = rolling_score(branch, day)
-            if score < 6:
+            if score < 5:
                 continue
             parent = parent_of(branch, mapping)
             clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
@@ -1444,7 +1444,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             else:
                 latest_timeout_rate = None
             high.append({"branch": branch, "province": province_of(branch, mapping), "parent_name": parent, "stagnant_score": score,
-                "is_new": rolling_score(branch, previous_day) < 6 or rolling_score(branch, two_days_prior) < 6,
+                "is_new": rolling_score(branch, previous_day) < 5 or rolling_score(branch, two_days_prior) < 5,
                 "deduction_level": deduction["level"], "deduction_average": deduction["average"],
                 "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],
                 "long_order_level": long_order["level"], "long_order_average": long_order["average"], "long_order_days": long_order["days"],

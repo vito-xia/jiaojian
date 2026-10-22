@@ -80,7 +80,7 @@
         <div class="kpi-icon risk"><span>!</span></div>
         <p id="kpiRiskLabel">高积分网点</p>
         <strong id="kpiRisk">—</strong>
-        <span id="kpiRiskNote">滚动16天 ≥ 6分</span>
+        <span id="kpiRiskNote">滚动16天 ≥ 5分</span>
       </article>
       <article class="kpi-card">
         <div class="kpi-icon control"><span class="pulse"></span></div>
@@ -101,7 +101,7 @@
         <div>
           <div class="section-kicker"><span class="kicker-index blue">01</span>风险联动</div>
           <h2>平台预警与管控</h2>
-          <p>顶部锁定滚动 16 天停滞积分达到 6 分及以上的网点，下方联动平台管控与最近 20 条极差熔断反馈。</p>
+          <p>顶部锁定滚动 16 天停滞积分达到 5 分及以上的网点，下方联动平台管控与最近 20 条极差熔断反馈。</p>
         </div>
         <div class="section-status"><span class="status-dot active"></span><span id="controlStatus">抖音平台数据已接入</span></div>
       </div>
@@ -131,11 +131,15 @@
         <article class="data-card panel-card platform-score-card">
           <div class="panel-title">
             <div>
-              <span class="panel-label warning">风险阈值 ≥ 6</span>
+              <span class="panel-label warning">风险阈值 ≥ 5</span>
               <h3>高停滞积分网点</h3>
             </div>
-            <span class="record-count" id="scoreCount">0 条</span>
+            <div class="score-filter-controls">
+              <label class="jd-trend-filter" for="scoreRecentDays"><span>最近扣分</span><select id="scoreRecentDays" aria-label="最近扣分天数筛选"></select></label>
+              <span class="record-count" id="scoreCount">0 条</span>
+            </div>
           </div>
+          <p class="score-filter-hint" id="scoreRecentHint"></p>
           <div class="table-scroll compact-scroll">
             <table class="data-table compact-table score-table">
               <thead><tr><th>省区</th><th>网点名称</th><th>停滞积分</th><th title="揽收端 0/1/2 分记录均计入，按滚动 16 天内发运超时异常单量日均分级；仅有全链路积分时显示超长单扣分">扣分量级</th><th title="所选日期及之前共 15 个自然日；只计入超长单异常运单数有数值的日期，真实 0 计入">近期超长单量级</th><th>最近1天扣分</th><th>近1天超时量</th><th>近1天超时率</th><th>历史清退</th><th>最近清退</th></tr></thead>
@@ -404,7 +408,7 @@
     <section class="methodology" id="methodologySection" aria-label="口径说明">
       <div class="method-copy">
         <span class="method-icon">i</span>
-        <div><h3>口径说明</h3><p>停滞积分 = T-16 至 T-1 内“物流停滞-揽收端”与“物流停滞-全链路”的当前违规积分之和；6 分进入高风险观察，10 分触发积分清退规则。</p></div>
+        <div><h3>口径说明</h3><p>停滞积分 = T-16 至 T-1 内“物流停滞-揽收端”与“物流停滞-全链路”的当前违规积分之和；5 分进入高风险观察，10 分触发积分清退规则。</p></div>
       </div>
     </section>
 
@@ -430,7 +434,13 @@
     <button class="drawer-backdrop" id="drawerBackdrop" type="button" aria-label="关闭详情"></button>
     <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
       <div class="drawer-header">
-        <div><span class="drawer-kicker" id="drawerKicker">分部趋势</span><h2 id="drawerTitle">—</h2><p id="drawerParent">—</p></div>
+        <div class="drawer-heading"><span class="drawer-kicker" id="drawerKicker">分部趋势</span><h2 id="drawerTitle">—</h2><p id="drawerParent">—</p>
+          <div class="date-control drawer-date-control" id="drawerDateControl" aria-label="抽屉独立日期" hidden>
+            <button class="icon-button" id="drawerPreviousDate" type="button" aria-label="抽屉前一天">‹</button>
+            <label class="date-select-wrap"><span>抽屉数据日</span><select id="drawerDateSelect" aria-label="选择抽屉数据日期"></select></label>
+            <button class="icon-button" id="drawerNextDate" type="button" aria-label="抽屉后一天">›</button>
+          </div>
+        </div>
         <button class="close-button" id="closeDrawer" type="button" aria-label="关闭">×</button>
       </div>
       <div class="drawer-summary" id="drawerSummary"></div>
@@ -446,6 +456,6 @@
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=19"></script>
   <script src="assets/dashboard-loader.js?v=4"></script>
-  <script src="assets/dashboard.js?v=45"></script>
+  <script src="assets/dashboard.js?v=46"></script>
 </body>
 </html>
