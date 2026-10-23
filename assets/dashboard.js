@@ -657,7 +657,7 @@
   }
   function filteredControls() { return filterPlatformRows(currentControls()); }
   function scoreRecentRange(day = state.date, days = state.scoreRecentDays) {
-    return days ? dayRange(day, Number(days) + 1).slice(0, -1) : [];
+    return days ? dayRange(day, Number(days)) : [];
   }
   function filteredScores() {
     const range = scoreRecentRange();
@@ -1815,7 +1815,7 @@
   function renderScores() {
     const recentRange = scoreRecentRange();
     setText('#scoreRecentHint', recentRange.length
-      ? `最近扣分日：${recentRange[0]} 至 ${recentRange.at(-1)}（不含所选数据日）；积分仍按滚动 16 天累计`
+      ? `最近扣分日：${recentRange[0]} 至 ${recentRange.at(-1)}（含所选数据日）；积分仍按滚动 16 天累计`
       : '全部最近扣分日期；积分仍按滚动 16 天累计');
     const rows = filteredScores();
     const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));

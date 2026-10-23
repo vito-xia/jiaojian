@@ -1,5 +1,5 @@
 @echo off
-cd /d "D:\download\trae_projects\äº¤ä»¶ç›‘æŽ§"
+cd /d "D:\download\trae_projects\½»¼þ¼à¿Ø"
 
 echo ========================================
 echo   Publish Dashboard to Miaoda

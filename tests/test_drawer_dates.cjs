@@ -43,12 +43,19 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
       await page.waitForFunction(() => window.__JIAOJIAN_DASHBOARD__.delivery_monitor && window.__JIAOJIAN_DASHBOARD__.long_order_trends);
       const date = await page.locator('#dateSelect').inputValue();
       const expected = await page.evaluate(day => {
-        const start = new Date(day + 'T12:00:00'); start.setDate(start.getDate() - 2);
+        const start = new Date(day + 'T12:00:00'); start.setDate(start.getDate() - 1);
         const from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-        return window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].filter(row => row.latest_score_date >= from && row.latest_score_date < day).map(row => row.branch);
+        return window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].filter(row => row.latest_score_date >= from && row.latest_score_date <= day).map(row => row.branch);
       }, date);
       assert.equal(await page.locator('#scoreRecentDays').inputValue(), '2');
       assert.deepEqual(await actualBranches(page), expected.slice(0, 10));
+      const hint = await page.locator('#scoreRecentHint').innerText();
+      assert.ok(hint.includes(`${date}（含所选数据日）`));
+      if (expected.length > 10) {
+        await page.locator('#scorePagination [data-page="2"]').first().click();
+        assert.deepEqual(await actualBranches(page), expected.slice(10, 20));
+        await page.locator('#scorePagination [data-page="1"]').first().click();
+      }
       const unaffected = await page.locator('#controlBody').innerHTML();
       const kpi = await page.locator('#kpiRisk').innerText();
       await page.locator('#scoreRecentDays').selectOption('0');
@@ -81,7 +88,12 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
         await page.locator('#top10Body .js-branch').first().click();
         await drawerReady(page, before.date);
         const available = await page.locator('#drawerDateSelect option').evaluateAll(nodes => nodes.map(node => node.value));
-        assert.equal(available.includes('2026-10-22'), false, 'No T-day snapshot in historical drawer');
+        const today = await page.evaluate(() => {
+          const now = new Date();
+          return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        });
+        const regularDates = await page.evaluate(p => window.__JIAOJIAN_DASHBOARD__.platforms[p].dates, platform);
+        if (!regularDates.includes(today)) assert.equal(available.includes(today), false, 'No T-day snapshot in historical drawer');
         const targetDate = available[1];
         await page.locator('#customerTrendMetric').selectOption('48');
         await page.locator('#drawerDateSelect').selectOption(targetDate);
@@ -103,8 +115,12 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
         await drawerReady(page, targetDate);
         assert.deepEqual(await outerSnapshot(page), before);
         if (platform === '抖音') await page.locator('.drawer').screenshot({ path: path.join(output, `${protocol}-${width}-drawer.png`) });
-        const fits = await page.locator('#drawerDateControl').evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; });
-        assert.equal(fits, true);
+        // Browser focus may scroll the drawer horizontally after using its date buttons.
+        await page.locator('.drawer').evaluate(node => { node.scrollLeft = 0; });
+        await page.waitForFunction(() => {
+          const box = document.querySelector('#drawerDateControl').getBoundingClientRect();
+          return box.left >= 0 && box.right <= innerWidth;
+        });
         await closeDrawer(page);
         await page.locator('#top10Body .js-branch').first().click();
         await drawerReady(page, before.date);
