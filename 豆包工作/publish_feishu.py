@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,42 @@ def find_tool(name):
     if not tool:
         raise PublishError(f"找不到 {name}，请先安装并将其加入 PATH。")
     return tool
+
+
+def find_cli(explicit=None):
+    if explicit:
+        path = Path(explicit).expanduser()
+        cli = str(path.resolve()) if path.is_file() else shutil.which(explicit)
+        if not cli:
+            raise PublishError(f"指定的 lark-cli 不存在：{explicit}")
+        return cli
+    # Doubao ships a newer CLI separately from the npm installation on PATH.
+    if os.name == "nt":
+        appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        candidates = list((appdata / "LarkShell" / "aha").glob(
+            "users/*/doubao/sandbox_envs_dir/envs/*/override_dlcs/lark-cli.exe"
+        ))
+        candidates = [path for path in candidates if path.is_file()]
+        if candidates:
+            return str(max(candidates, key=lambda path: (path.stat().st_mtime_ns, str(path))))
+    return shutil.which("lark-cli.exe") or find_tool("lark-cli")
+
+
+def cli_publish_action(cli):
+    result = subprocess.run(
+        [cli, "apps", "--help"], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=30,
+    )
+    if result.returncode:
+        raise PublishError("无法读取 lark-cli apps --help，请检查所选 CLI 是否可运行。")
+    commands = set(re.findall(r"^\s+(\+[\w-]+)\s+", result.stdout, re.MULTILINE))
+    if not {"+get", "+release-get"}.issubset(commands):
+        raise PublishError("所选 CLI 缺少应用或发布状态查询命令，无法确认发布结果。")
+    if "+deploy" in commands:
+        return "+deploy"
+    if "+html-publish" in commands:
+        return "+html-publish"
+    raise PublishError("所选 CLI 不支持目录发布；需要 apps +deploy 或 +html-publish。")
 
 
 def check_project(root):
@@ -70,9 +107,13 @@ def check_dist(dist):
 
 
 def cli_data(cli, root, action, *args):
+    environment = dict(os.environ)
+    environment["LARKSUITE_CLI_NO_UPDATE_NOTIFIER"] = "1"
+    environment["LARKSUITE_CLI_NO_SKILLS_NOTIFIER"] = "1"
     result = subprocess.run(
         [cli, "apps", action, "--app-id", APP_ID, *args, "--as", "user", "--format", "json"],
-        cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=300 if action in {"+deploy", "+html-publish"} else 120, env=environment,
     )
     try:
         payload = json.loads(result.stdout)
@@ -88,7 +129,7 @@ def cli_data(cli, root, action, *args):
                     error = failure.get("error", {})
             except json.JSONDecodeError:
                 pass
-        detail = (error.get("hint") or error.get("message")) if isinstance(error, dict) else None
+        detail = "；".join(str(error[key]) for key in ("message", "hint") if error.get(key)) if isinstance(error, dict) else None
         raise PublishError(
             f"飞书 {action} 失败：{detail or '命令未返回有效的成功结果，请检查 CLI 环境和授权。'}\n"
             "如授权不足，请在已授权的终端或豆包工作执行；脚本不会自动重新授权。"
@@ -141,16 +182,21 @@ def wait_for_release(cli, root, release_id):
         time.sleep(min(POLL_SECONDS, remaining))
 
 
-def publish(root, npm, cli):
+def publish(root, npm, cli, action):
     print("[1/4] 核对飞书授权与目标应用类型……", flush=True)
-    require_html_app(cli_data(cli, root, "+get"))
+    app_data = cli_data(cli, root, "+get")
+    if app_data.get("app", {}).get("app_id") != APP_ID:
+        raise PublishError("应用详情中的 app_id 不匹配，停止发布。")
+    if action == "+html-publish":
+        require_html_app(app_data)
     print("[2/4] 重新构建静态站点……", flush=True)
     result = subprocess.run([npm, "run", "build"], cwd=root)
     if result.returncode:
         raise PublishError(f"构建失败（退出码 {result.returncode}），停止上传。")
     check_dist(root / "dist")
     print("[3/4] 上传完整 dist 到已有妙搭应用……", flush=True)
-    data = cli_data(cli, root, "+html-publish", "--path", "./dist")
+    path_flag = "--dir" if action == "+deploy" else "--path"
+    data = cli_data(cli, root, action, path_flag, "./dist")
     release_id = data.get("release_id")
     if isinstance(release_id, str) and release_id:
         print(f"[4/4] 确认发布记录 {release_id}……", flush=True)
@@ -167,11 +213,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="仅检查本地环境与已有 dist，不构建、不访问云端")
     parser.add_argument("--no-pause", action="store_true", help="供 BAT 使用：退出前不暂停")
+    parser.add_argument("--cli", help="指定 lark-cli 的完整路径；默认优先使用豆包附带的 CLI")
     args = parser.parse_args(argv)
     try:
         check_project(ROOT)
-        npm, cli = find_tool("npm"), find_tool("lark-cli")
-        print(f"项目目录：{ROOT}\n目标应用：{APP_ID}")
+        npm, cli = find_tool("npm"), find_cli(args.cli)
+        action = cli_publish_action(cli)
+        print(f"项目目录：{ROOT}\n目标应用：{APP_ID}\n使用 CLI：{cli}\n发布命令：apps {action}")
         if args.check:
             if (ROOT / "dist").exists():
                 check_dist(ROOT / "dist")
@@ -179,7 +227,7 @@ def main(argv=None):
                 print("[提示] 尚无 dist，正式执行时将重新构建。")
             print("[检查通过] 本地环境可用；未构建、未访问云端。应用类型、授权和发布结果须在正式执行时确认。")
         else:
-            publish(ROOT, npm, cli)
+            publish(ROOT, npm, cli, action)
         return 0
     except (PublishError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"[失败] {error}", file=sys.stderr)
