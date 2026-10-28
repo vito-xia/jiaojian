@@ -2,7 +2,7 @@
 """
 交件超时数据源更新工具
 双击运行：读取「数据源-手动更新/交件链接清单T-1日.txt」中的下载链接，
-逐个下载并保留表头及前198行正文，保存到 T-1 处理后目录。
+逐个下载并保留表头及前500行正文，保存到 T-1 处理后目录。
 兼容旧版两行表头和新版三行表头，保留原始列及格式。
 看板刷新由内部 run_update.py 统一编排，本脚本只负责下载。
 """
@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_SOURCE_DIR = PROJECT_ROOT / "数据源"
 OUT_DIR = DATA_SOURCE_DIR / "脚本处理后输出" / "交件T-1脚本处理后"
 LINK_FILE = DATA_SOURCE_DIR / "数据源-手动更新" / "交件链接清单T-1日.txt"
-KEEP_DATA_ROWS = 198  # 与旧版“前200行（两行表头）”的正文行数一致
+KEEP_DATA_ROWS = 500  # 两版表头均另行保留；正文不足500行时保留全部
 
 
 def read_links(file_path):

@@ -80,7 +80,7 @@
         <div class="kpi-icon risk"><span>!</span></div>
         <p id="kpiRiskLabel">高积分网点</p>
         <strong id="kpiRisk">—</strong>
-        <span id="kpiRiskNote">滚动16天 ≥ 5分</span>
+        <span id="kpiRiskNote">滚动16天 ≥ 4分</span>
       </article>
       <article class="kpi-card">
         <div class="kpi-icon control"><span class="pulse"></span></div>
@@ -101,7 +101,7 @@
         <div>
           <div class="section-kicker"><span class="kicker-index blue">01</span>风险联动</div>
           <h2>平台预警与管控</h2>
-          <p>顶部锁定滚动 16 天停滞积分达到 5 分及以上的网点，下方联动平台管控与最近 20 条极差熔断反馈。</p>
+          <p>顶部按自定义阈值展示滚动 16 天高停滞积分网点（默认 4 分及以上），下方联动平台管控与最近 20 条极差熔断反馈。</p>
         </div>
         <div class="section-status"><span class="status-dot active"></span><span id="controlStatus">抖音平台数据已接入</span></div>
       </div>
@@ -131,10 +131,11 @@
         <article class="data-card panel-card platform-score-card">
           <div class="panel-title">
             <div>
-              <span class="panel-label warning">风险阈值 ≥ 5</span>
+              <span class="panel-label warning" id="scoreThresholdLabel">风险阈值 ≥ 4</span>
               <h3>高停滞积分网点</h3>
             </div>
             <div class="score-filter-controls">
+              <label class="jd-trend-filter" for="scoreThreshold"><span>积分阈值</span><select id="scoreThreshold" aria-label="高积分网点积分阈值"></select></label>
               <label class="jd-trend-filter" for="scoreRecentDays"><span>最近扣分</span><select id="scoreRecentDays" aria-label="最近扣分天数筛选"></select></label>
               <span class="record-count" id="scoreCount">0 条</span>
             </div>
@@ -456,6 +457,6 @@
   <noscript><style>.page-load-progress{display:none}</style><p class="noscript">此看板需要启用 JavaScript。</p></noscript>
   <script src="data/dashboard_bundle.js?v=19"></script>
   <script src="assets/dashboard-loader.js?v=4"></script>
-  <script src="assets/dashboard.js?v=47"></script>
+  <script src="assets/dashboard.js?v=48"></script>
 </body>
 </html>

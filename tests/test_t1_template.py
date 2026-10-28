@@ -16,7 +16,7 @@ t1_download = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(t1_download)
 
 
-def make_source(header_rows, invalid_group=False):
+def make_source(header_rows, invalid_group=False, body_rows=502):
     workbook = Workbook()
     sheet = workbook.active
     for col, label in enumerate(("序号", "分部", "客户", "客户编码", "是否配置发运兜底", "是否历史有单无货"), 1):
@@ -40,7 +40,7 @@ def make_source(header_rows, invalid_group=False):
     sheet.cell(header_rows, 7, "票件量A")
     sheet.cell(header_rows, 8, "超时量B")
     sheet.cell(header_rows, 9, rate_label)
-    for index in range(1, 201):
+    for index in range(1, body_rows + 1):
         row = header_rows + index
         sheet.cell(row, 2, "合计" if index == 1 else f"网点{index}")
         sheet.cell(row, 3, f"客户{index}")
@@ -69,16 +69,26 @@ class T1TemplateTests(unittest.TestCase):
                     t1_download.urllib.request, "urlopen", return_value=io.BytesIO(payload)
                 ):
                     saved_rows = t1_download.download_and_save("抖音_9月23日.xlsx", "https://unused.example")
-                self.assertEqual(saved_rows, header_rows + 198)
+                self.assertEqual(saved_rows, header_rows + 500)
 
                 records = read_timeout(Path(temp_dir), 2026)
-                self.assertEqual(len(records), 197)
+                self.assertEqual(len(records), 499)
                 self.assertEqual(records[0]["branch"], "网点2")
                 self.assertEqual(records[0]["timeout_24h"], 0)
                 self.assertEqual(records[0]["timeout_rate_36h"], 0)
                 self.assertEqual(records[0]["timeout_120h"], 6)
-                self.assertEqual(records[-1]["branch"], "网点198")
-                self.assertEqual(records[-1]["timeout_48h"], 199)
+                self.assertEqual(records[-1]["branch"], "网点500")
+                self.assertEqual(records[-1]["timeout_48h"], 501)
+
+    def test_short_sources_are_not_padded_to_five_hundred(self):
+        for header_rows in (2, 3):
+            with self.subTest(header_rows=header_rows), tempfile.TemporaryDirectory() as temp_dir:
+                with patch.object(t1_download, "OUT_DIR", Path(temp_dir)), patch.object(
+                    t1_download.urllib.request, "urlopen", return_value=io.BytesIO(make_source(header_rows, body_rows=7))
+                ):
+                    saved_rows = t1_download.download_and_save("京东_9月23日.xlsx", "https://unused.example")
+                self.assertEqual(saved_rows, header_rows + 7)
+                self.assertEqual(len(read_timeout(Path(temp_dir), 2026)), 6)
 
     def test_unknown_metric_layout_fails_before_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:

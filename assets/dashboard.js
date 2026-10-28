@@ -475,7 +475,7 @@
   const JD_CONTROL_RULE = Object.freeze({ startDate: '2026-08-02', windowDays: 7, hitCount: 4, maxRows: 100 });
   const JD_THRESHOLD_STORAGE_KEY = 'jiaojian.jd-ranking-thresholds.36h.v1';
   const state = {
-    platform: '抖音', date: '', controlPage: 1, scorePage: 1, scoreRecentDays: 2, extremePage: 1,
+    platform: '抖音', date: '', controlPage: 1, scorePage: 1, scoreThreshold: 4, scoreRecentDays: 2, extremePage: 1,
     branchQuery: '', branchProvince: '', platformQuery: '', platformProvince: '', scoreScene: '物流停滞-揽收端',
     deliveryQuery: '', deliveryProvince: '', deliveryControlPage: 1, deliveryHighScorePage: 1,
     topPage: 1, topPageSize: 10, longOrderQuery: '', longOrderProvince: '', longOrderPage: 1, longOrderPageSize: 10,
@@ -576,7 +576,10 @@
   function filteredTopRows() { return topRows().filter(row => provinceMatches(row, state.branchProvince)); }
   function currentControlDate() { return data.meta?.control_as_of || state.date; }
   function currentControls() { return isTdayActive() ? [] : data.controls_by_date?.[currentControlDate()] || []; }
-  function currentScores(day = state.date) { return isTdayActive() ? [] : data.high_scores_by_date?.[day] || []; }
+  function currentScores(day = state.date) {
+    if (isTdayActive()) return [];
+    return (data.high_scores_by_date?.[day] || []).filter(row => Number(row.stagnant_score || 0) >= state.scoreThreshold);
+  }
   function currentExtremeRecords() {
     if (isTdayActive()) return [];
     return [...(data.extreme_records || [])]
@@ -662,6 +665,10 @@
   function filteredScores() {
     const range = scoreRecentRange();
     return filterPlatformRows(currentScores()).filter(row => !range.length || range.includes(row.latest_score_date));
+  }
+  function scoreIsNew(row) {
+    if (row.previous_score == null || row.two_days_prior_score == null) return Boolean(row.is_new);
+    return Number(row.previous_score) < state.scoreThreshold || Number(row.two_days_prior_score) < state.scoreThreshold;
   }
   function filteredExtremeRecords() { return filterPlatformRows(currentExtremeRecords()); }
   function currentDataLabel() { return isTdayActive() ? 'T日' : state.platform === '京东' ? 'T-2' : 'T-1'; }
@@ -952,6 +959,15 @@
     }
   }
   function bindEvents() {
+    $('#scoreThreshold').innerHTML = Array.from({ length: 12 }, (_, index) => `<option value="${index + 4}">≥ ${index + 4} 分</option>`).join('');
+    $('#scoreThreshold').value = String(state.scoreThreshold);
+    $('#scoreThreshold').addEventListener('change', event => {
+      state.scoreThreshold = Number(event.target.value);
+      state.scorePage = 1;
+      renderKpis();
+      renderPlatformModule();
+      renderDailyAnalysis();
+    });
     $('#scoreRecentDays').innerHTML = Array.from({ length: 15 }, (_, index) => `<option value="${index + 1}">最近 ${index + 1} 天</option>`).join('') + '<option value="0">全部日期</option>';
     $('#scoreRecentDays').value = String(state.scoreRecentDays);
     $('#scoreRecentDays').addEventListener('change', event => {
@@ -1441,7 +1457,7 @@
     if (state.platform === '抖音') {
       setText('#kpiRiskLabel', '高积分网点');
       setText('#kpiRisk', `${currentScores().length}`);
-      setText('#kpiRiskNote', `${dayRange(state.date, 16)[0]} 至 ${state.date} · ≥ 5分`);
+      setText('#kpiRiskNote', `${dayRange(state.date, 16)[0]} 至 ${state.date} · ≥ ${state.scoreThreshold}分`);
       setText('#kpiControlLabel', '执行中网点管控');
       setText('#kpiControl', `${data.meta.summary.executing_branch_controls}`);
       setText('#kpiControlNote', `当前快照 · 店铺管控 ${data.meta.summary.executing_merchant_controls} 条`);
@@ -1814,9 +1830,10 @@
 
   function renderScores() {
     const recentRange = scoreRecentRange();
+    setText('#scoreThresholdLabel', `风险阈值 ≥ ${state.scoreThreshold}`);
     setText('#scoreRecentHint', recentRange.length
-      ? `最近扣分日：${recentRange[0]} 至 ${recentRange.at(-1)}（含所选数据日）；积分仍按滚动 16 天累计`
-      : '全部最近扣分日期；积分仍按滚动 16 天累计');
+      ? `积分阈值 ≥ ${state.scoreThreshold} 分；最近扣分日：${recentRange[0]} 至 ${recentRange.at(-1)}（含所选数据日）；积分仍按滚动 16 天累计`
+      : `积分阈值 ≥ ${state.scoreThreshold} 分；全部最近扣分日期；积分仍按滚动 16 天累计`);
     const rows = filteredScores();
     const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.scorePage = Math.min(state.scorePage, pages);
@@ -1827,7 +1844,7 @@
       return `<tr>
         <td class="province-cell">${provinceCell(row.province)}</td>
         <td>${branchButton(row.branch, row.parent_name)}</td>
-        <td><div class="score-track">${scoreChip(row.stagnant_score)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${row.is_new ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
+        <td><div class="score-track">${scoreChip(row.stagnant_score, state.scoreThreshold)}<span class="track"><span class="fill ${row.stagnant_score >= 10 ? 'clear' : ''}" style="width:${width}%"></span></span>${scoreIsNew(row) ? '<span class="new-score-badge">NEW</span>' : ''}</div></td>
         <td>${deductionLevelChip(row)}</td>
         <td>${longOrderLevelChip(row)}</td>
         <td>${shortDate(row.latest_score_date)}</td>
@@ -1836,7 +1853,7 @@
         <td>${formatNumber(row.clearout_count)}次</td>
         <td>${shortDate(row.last_clearout_date)}<span class="subline">${escapeHtml(row.last_clearout_type || '—')}</span></td>
       </tr>`;
-    }).join('') : '<tr class="empty-row"><td colspan="10">当前筛选条件下暂无积分达到 5 分的网点</td></tr>';
+    }).join('') : `<tr class="empty-row"><td colspan="10">当前筛选条件下暂无积分达到 ${state.scoreThreshold} 分的网点</td></tr>`;
     renderPagination($('#scorePagination'), state.scorePage, pages, rows.length, 'score');
   }
 
@@ -3476,7 +3493,7 @@
       insights.push('当前日期是该平台首个可用数据日，暂不做环比判断。');
     }
     if (state.platform === '抖音') {
-      insights.push(`联动风险：滚动 16 天达到 5 分及以上的网点 ${currentScores().length} 个，近 7 天平台管控动作 ${currentControls().length} 条。`);
+      insights.push(`联动风险：滚动 16 天达到 ${state.scoreThreshold} 分及以上的网点 ${currentScores().length} 个，近 7 天平台管控动作 ${currentControls().length} 条。`);
     } else if (jd) {
       insights.push('京东按 36H 内部交件预警分析；发货量由 36H 超时量与 36H 超时率反推，停滞积分和抖音平台管控不参与结论。');
     } else {

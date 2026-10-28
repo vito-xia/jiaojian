@@ -45,8 +45,9 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
       const expected = await page.evaluate(day => {
         const start = new Date(day + 'T12:00:00'); start.setDate(start.getDate() - 1);
         const from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-        return window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].filter(row => row.latest_score_date >= from && row.latest_score_date <= day).map(row => row.branch);
+        return window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].filter(row => row.stagnant_score >= 4 && row.latest_score_date >= from && row.latest_score_date <= day).map(row => row.branch);
       }, date);
+      assert.equal(await page.locator('#scoreThreshold').inputValue(), '4');
       assert.equal(await page.locator('#scoreRecentDays').inputValue(), '2');
       assert.deepEqual(await actualBranches(page), expected.slice(0, 10));
       const hint = await page.locator('#scoreRecentHint').innerText();
@@ -59,7 +60,7 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
       const unaffected = await page.locator('#controlBody').innerHTML();
       const kpi = await page.locator('#kpiRisk').innerText();
       await page.locator('#scoreRecentDays').selectOption('0');
-      const all = await page.evaluate(day => window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].map(row => row.branch), date);
+      const all = await page.evaluate(day => window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day].filter(row => row.stagnant_score >= 4).map(row => row.branch), date);
       assert.deepEqual(await actualBranches(page), all.slice(0, 10));
       if (all.length > 10) {
         await page.locator('#scorePagination [data-page="2"]').first().click();
@@ -68,6 +69,22 @@ const actualBranches = page => page.locator('#scoreBody .js-branch').allTextCont
       await page.locator('#scoreRecentDays').selectOption('2');
       assert.deepEqual(await actualBranches(page), expected.slice(0, 10));
       assert.equal(await page.locator('#controlBody').innerHTML(), unaffected);
+      assert.equal(await page.locator('#kpiRisk').innerText(), kpi);
+      const thresholdFive = await page.evaluate(day => {
+        const start = new Date(day + 'T12:00:00'); start.setDate(start.getDate() - 1);
+        const from = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+        const rows = window.__JIAOJIAN_DASHBOARD__.high_scores_by_date[day];
+        return {
+          recent: rows.filter(row => row.stagnant_score >= 5 && row.latest_score_date >= from && row.latest_score_date <= day).map(row => row.branch),
+          total: rows.filter(row => row.stagnant_score >= 5).length,
+        };
+      }, date);
+      await page.locator('#scoreThreshold').selectOption('5');
+      assert.deepEqual(await actualBranches(page), thresholdFive.recent.slice(0, 10));
+      assert.equal(await page.locator('#kpiRisk').innerText(), String(thresholdFive.total));
+      assert.equal(await page.locator('#controlBody').innerHTML(), unaffected);
+      await page.locator('#scoreThreshold').selectOption('4');
+      assert.deepEqual(await actualBranches(page), expected.slice(0, 10));
       assert.equal(await page.locator('#kpiRisk').innerText(), kpi);
       if (expected.length) {
         await page.locator('#platformSearch').fill(expected[0]);

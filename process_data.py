@@ -27,6 +27,7 @@ PLATFORMS = ("抖音", "淘宝", "京东", "快手")
 PICKUP_SCORE_SCENE = "物流停滞-揽收端"
 LONG_ORDER_SCORE_SCENE = "物流停滞-全链路"
 SCORE_SCENES = {PICKUP_SCORE_SCENE, LONG_ORDER_SCORE_SCENE}
+HIGH_SCORE_THRESHOLD = 4
 DEDUCTION_SCORE_VALUES = {0.0, 1.0, 2.0}
 DELIVERY_SCORE_SCENES = {"物流停滞-派送端"}
 CONTROL_ACTIONS = {"揽收能力预警", "限制面单新签", "限制面单取号"}
@@ -1413,7 +1414,7 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
         high = []
         for branch in daily_scores:
             score = rolling_score(branch, day)
-            if score < 5:
+            if score < HIGH_SCORE_THRESHOLD:
                 continue
             parent = parent_of(branch, mapping)
             clear = parent_clear.get(parent, {"count": 0, "last_date": "", "last_type": ""})
@@ -1444,7 +1445,9 @@ def build_dashboard(timeout_rows, top5, branch_top5_rows, mapping, score_rows, d
             else:
                 latest_timeout_rate = None
             high.append({"branch": branch, "province": province_of(branch, mapping), "parent_name": parent, "stagnant_score": score,
-                "is_new": rolling_score(branch, previous_day) < 5 or rolling_score(branch, two_days_prior) < 5,
+                "is_new": rolling_score(branch, previous_day) < HIGH_SCORE_THRESHOLD or rolling_score(branch, two_days_prior) < HIGH_SCORE_THRESHOLD,
+                "previous_score": rolling_score(branch, previous_day),
+                "two_days_prior_score": rolling_score(branch, two_days_prior),
                 "deduction_level": deduction["level"], "deduction_average": deduction["average"],
                 "deduction_days": deduction["days"], "deduction_scores": deduction["scores"],
                 "long_order_level": long_order["level"], "long_order_average": long_order["average"], "long_order_days": long_order["days"],
@@ -1547,6 +1550,7 @@ def write_high_score_excel(path: Path, dashboard: dict[str, Any]) -> int:
     dates = dashboard["platforms"]["抖音"]["dates"]
     latest_board_day = max(dates, default="")
     rows = dashboard["high_scores_by_date"].get(latest_board_day, []) if latest_board_day else []
+    rows = [row for row in rows if number(row.get("stagnant_score")) >= HIGH_SCORE_THRESHOLD]
     current_rows = []
     for row in rows:
         marker = deduction_date_label(latest_board_day, row.get("latest_score_date") or "")

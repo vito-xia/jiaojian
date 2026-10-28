@@ -64,10 +64,10 @@ class HighScoreExportTests(unittest.TestCase):
         self.assertEqual(index["网点甲"]["2026-09-10"][("code", "C1")], {"是"})
 
     def test_workbook_only_keeps_current_t1_t2_and_sorts_missing_after_zero(self):
-        def row(branch, day, volume):
+        def row(branch, day, volume, score=6):
             return {
                 "branch": branch,
-                "stagnant_score": 6,
+                "stagnant_score": score,
                 "deduction_level": "100-",
                 "deduction_average": 0,
                 "deduction_days": 1,
@@ -88,6 +88,7 @@ class HighScoreExportTests(unittest.TestCase):
                     row("乙", "2026-09-15", None),
                     row("丙", "2026-09-14", 0),
                     row("丁", "2026-09-13", 100),
+                    row("低于默认阈值", "2026-09-15", 999, 3.99),
                 ],
             },
         }
