@@ -159,6 +159,48 @@ def valid_url(value):
     return url.scheme == "https" and bool(url.netloc) and not any(c.isspace() for c in value)
 
 
+VERSION_RE = re.compile(r'((?:href|src)="[a-zA-Z0-9_.\-/]+\?v=)(\d+)(")')
+
+
+def publish_asset_version(dist):
+    """从 dist 的 dashboard_bundle.js 读取本次构建的 asset_version（build 时间戳）。"""
+    bundle = dist / "data" / "dashboard_bundle.js"
+    if not bundle.is_file():
+        raise PublishError("构建产物缺少 data/dashboard_bundle.js，无法生成缓存版本号。")
+    match = re.search(r'"asset_version":"([^"]+)"', bundle.read_text(encoding="utf-8"))
+    if not match:
+        raise PublishError("dashboard_bundle.js 中未找到 asset_version，无法生成缓存版本号。")
+    return match.group(1)
+
+
+def prepare_publish_dir(dist, work_dir):
+    """把 dist 复制成发布副本，并把资源版本号统一刷成本次构建的 asset_version。"""
+    version = publish_asset_version(dist)
+    # 清理历史副本；被占用等清理失败不阻塞发布。
+    for old in work_dir.glob("dist_publish*"):
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+    publish_dir = work_dir / f"dist_publish_{version}"
+    shutil.copytree(dist, publish_dir)
+    bumped = 0
+
+    def bump(match):
+        nonlocal bumped
+        bumped += 1
+        return f"{match.group(1)}{version}{match.group(3)}"
+
+    for html in sorted(publish_dir.glob("*.html")):
+        text = html.read_text(encoding="utf-8")
+        new_text = VERSION_RE.sub(bump, text)
+        if new_text != text:
+            html.write_text(new_text, encoding="utf-8")
+    if bumped == 0:
+        raise PublishError("未在发布副本的 HTML 中发现 ?v= 版本号引用，缓存刷新未生效，停止发布。")
+    print(f"[缓存] 发布副本已就绪：{publish_dir}")
+    print(f"[缓存] 已把 {bumped} 处资源版本号统一刷为 {version}，绕过浏览器与 CDN 缓存。", flush=True)
+    return publish_dir
+
+
 def wait_for_release(cli, root, release_id):
     deadline = time.monotonic() + RELEASE_TIMEOUT
     while True:
@@ -182,24 +224,26 @@ def wait_for_release(cli, root, release_id):
         time.sleep(min(POLL_SECONDS, remaining))
 
 
-def publish(root, npm, cli, action):
-    print("[1/4] 核对飞书授权与目标应用类型……", flush=True)
+def publish(root, npm, cli, action, work_dir):
+    print("[1/5] 核对飞书授权与目标应用类型……", flush=True)
     app_data = cli_data(cli, root, "+get")
     if app_data.get("app", {}).get("app_id") != APP_ID:
         raise PublishError("应用详情中的 app_id 不匹配，停止发布。")
     if action == "+html-publish":
         require_html_app(app_data)
-    print("[2/4] 重新构建静态站点……", flush=True)
+    print("[2/5] 重新构建静态站点……", flush=True)
     result = subprocess.run([npm, "run", "build"], cwd=root)
     if result.returncode:
         raise PublishError(f"构建失败（退出码 {result.returncode}），停止上传。")
     check_dist(root / "dist")
-    print("[3/4] 上传完整 dist 到已有妙搭应用……", flush=True)
+    print("[3/5] 准备发布副本并刷新缓存版本号……", flush=True)
+    publish_dir = prepare_publish_dir(root / "dist", work_dir)
+    print("[4/5] 上传发布副本到已有妙搭应用……", flush=True)
     path_flag = "--dir" if action == "+deploy" else "--path"
-    data = cli_data(cli, root, action, path_flag, "./dist")
+    data = cli_data(cli, publish_dir, action, path_flag, ".")
     release_id = data.get("release_id")
     if isinstance(release_id, str) and release_id:
-        print(f"[4/4] 确认发布记录 {release_id}……", flush=True)
+        print(f"[5/5] 确认发布记录 {release_id}……", flush=True)
         url = wait_for_release(cli, root, release_id)
     else:
         # 部分旧版 HTML 应用同步返回 url；只接受本次上传的直接结果。
@@ -227,7 +271,7 @@ def main(argv=None):
                 print("[提示] 尚无 dist，正式执行时将重新构建。")
             print("[检查通过] 本地环境可用；未构建、未访问云端。应用类型、授权和发布结果须在正式执行时确认。")
         else:
-            publish(ROOT, npm, cli, action)
+            publish(ROOT, npm, cli, action, Path(__file__).resolve().parent)
         return 0
     except (PublishError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"[失败] {error}", file=sys.stderr)
